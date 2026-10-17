@@ -1,0 +1,50 @@
+<resources>
+    <string name="app_name">ApkToolMD</string>
+
+    <string name="nav_home">Home</string>
+    <string name="nav_tools">Tools</string>
+    <string name="nav_settings">Settings</string>
+
+    <string name="demo_only">Demo only — nothing is wired up yet.</string>
+
+    <!-- Home -->
+    <string name="home_greeting">Welcome to ApkToolMD</string>
+    <string name="home_subtitle">Inspect, extract and sign APK files right on your device.</string>
+    <string name="stat_apks">APKs</string>
+    <string name="stat_tools">Tools</string>
+    <string name="stat_signed">Signed</string>
+    <string name="section_quick_actions">Quick actions</string>
+    <string name="action_scan">Scan</string>
+    <string name="action_extract">Extract</string>
+    <string name="action_sign">Sign</string>
+    <string name="featured_title">Fully offline</string>
+    <string name="featured_desc">No uploads and no internet required. Everything runs locally on your phone.</string>
+
+    <!-- Tools -->
+    <string name="tools_title">Demo features</string>
+    <string name="tools_desc">A small playground of Material components.</string>
+    <string name="label_demo_switch">Enable demo mode</string>
+    <string name="switch_off">Off</string>
+    <string name="switch_on">On</string>
+    <string name="label_demo_slider">Intensity</string>
+    <string name="chips_header">Filter by tag</string>
+    <string name="chip_apk">apk</string>
+    <string name="chip_dex">dex</string>
+    <string name="chip_manifest">manifest</string>
+    <string name="tools_progress_label">Processing</string>
+    <string name="action_run_demo">Run demo</string>
+    <string name="hint_input">Type something…</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="pref_appearance">Appearance</string>
+    <string name="pref_dark">Dark theme</string>
+    <string name="pref_dark_summary">Use a darker color palette</string>
+    <string name="pref_notifications">Notifications</string>
+    <string name="pref_notifications_summary">Alerts when a task finishes</string>
+    <string name="pref_beta">Beta features</string>
+    <string name="pref_beta_summary">Try experimental tools early</string>
+    <string name="pref_about">About</string>
+    <string name="about_desc">ApkToolMD 1.0\nAn offline APK inspection toolkit.</string>
+    <string name="action_about">Show about dialog</string>
+</resources>
