@@ -23,8 +23,12 @@ jobs:
 
       - name: Install SDK platform 29 + build-tools 29.0.3
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platform-tools" "platforms;android-29" "build-tools;29.0.3"
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SDKMGR="$(find "$SDK" -type f -name sdkmanager 2>/dev/null | head -1)"
+          echo "SDK=$SDK"
+          echo "sdkmanager=$SDKMGR"
+          yes | "$SDKMGR" --licenses > /dev/null 2>&1 || true
+          "$SDKMGR" "platform-tools" "platforms;android-29" "build-tools;29.0.3" "platforms;android-29"
 
       - name: Set up JDK 8 (for this old AGP 3.5 / Gradle 6.1 toolchain)
         uses: actions/setup-java@v4
