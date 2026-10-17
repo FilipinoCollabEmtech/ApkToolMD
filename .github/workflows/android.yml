@@ -21,11 +21,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install SDK platform 29 + build-tools 29.0.3
-        run: sdkmanager "platform-tools" "platforms;android-29" "build-tools;29.0.3"
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platform-tools" "platforms;android-29" "build-tools;29.0.3"
 
       - name: Set up JDK 8 (for this old AGP 3.5 / Gradle 6.1 toolchain)
         uses: actions/setup-java@v4
