@@ -1,0 +1,50 @@
+e_machine: 0xB7
+Library: /data/app/com.ForgeGames.SpecialForcesGroup2-AB2AittT5lwyjt10KL-CNQ==/base.apk
+BaseAddress: 0x7E3624C000
+7e3624c000-7e3a362000 r-xp eed000 fd:03 2885522 /data/app/com.ForgeGames.SpecialForcesGroup2-AB2AittT5lwyjt10KL-CNQ==/base.apk
+7e3a362000-7e3a365000 ---p 0 00:00 0 
+7e3a365000-7e3a8f0000 r--p 5002000 fd:03 2885522 /data/app/com.ForgeGames.SpecialForcesGroup2-AB2AittT5lwyjt10KL-CNQ==/base.apk
+7e3a8f0000-7e3a90a000 rw-p 558d000 fd:03 2885522 /data/app/com.ForgeGames.SpecialForcesGroup2-AB2AittT5lwyjt10KL-CNQ==/base.apk
+7e3a90a000-7e3abee000 rw-p 0 00:00 0 [anon:.bss]
+7e3abee000-7e3abfc000 ---p 0 00:00 0 
+7e3abfc000-7e3ac00000 rw-p 55ad000 fd:03 2885522 /data/app/com.ForgeGames.SpecialForcesGroup2-AB2AittT5lwyjt10KL-CNQ==/base.apk
+==========================
+GNames: [<Base> + 0x46D2E90] = 0x7E3A91EE90
+Test dumping first 5 name entries
+GetNameByID(0): None
+GetNameByID(1): ByteProperty
+GetNameByID(2): IntProperty
+GetNameByID(3): BoolProperty
+GetNameByID(4): FloatProperty
+==========================
+GUObjectArray: [<Base> + 0x4822620] = 0x7E3AA6E620
+ObjObjects: [<Base> + 0x4822630] = 0x7E3AA6E630
+ObjObjects Num: 58271
+Test Dumping First 5 Name Entries
+GetObjectPtr(0): CoreUObject
+GetObjectPtr(1): Object
+GetObjectPtr(2): Engine
+GetObjectPtr(3): BlueprintFunctionLibrary
+GetObjectPtr(4): UniversalMobileAds
+==========================
+Finding GEngine & GWorld...
+Class Engine.Engine -> 0x7E28FA9400
+Class Engine.World -> 0x7E280B3340
+GEngine: [<Base> + 0x493C1F8] = 0x7E3AB881F8
+GWorld: [<Base> + 0x493F400] = 0x7E3AB8B400
+==========================
+Matrix: [<Base> + 0x492D2B8] = 0x7E3AB792B8
+Couldn't find refrence to Physx.
+Couldn't find refrence to FrameCount.
+==========================
+Gathering UObjects...
+Gathered 58271 Objects (Packages 181)
+==========================
+Saved packages: 181
+Saved classes: 1983
+Saved structs: 1284
+Saved enums: 706
+==========================
+Generating script json...
+Functions: 5160
+==========================

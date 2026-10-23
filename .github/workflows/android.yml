@@ -1,0 +1,145 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      KEYSTORE_FILE: ${{ github.workspace }}/keystore/release.p12
+      ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/21.4.7075529
+    steps:
+      - name: Checkout our repo
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (for Android SDK tools)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install SDK platform 29 + build-tools 29.0.3 + NDK 21
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SDKMGR="$(find "$SDK" -type f -name sdkmanager 2>/dev/null | head -1)"
+          yes | "$SDKMGR" --licenses > /dev/null 2>&1 || true
+          "$SDKMGR" "platform-tools" "platforms;android-29" "build-tools;29.0.3" "ndk;21.4.7075529"
+
+      - name: Clone Android_UE_Dumper_CN (with submodules)
+        run: |
+          git clone --recurse-submodules https://github.com/DreamFekk/Android_UE_Dumper_CN.git /tmp/uecn
+          ls /tmp/uecn/AndUEDumper/src
+
+      - name: Build UEDump3r (arm64-v8a)
+        run: |
+          NDK="/usr/local/lib/android/sdk/ndk/21.4.7075529"
+          # arm64 only
+          sed -i 's/^APP_ABI.*/APP_ABI := arm64-v8a/' /tmp/uecn/AndUEDumper/Application.mk
+          # SFG2 profile + customizations
+          cp ${{ github.workspace }}/patches/SFG2.hpp /tmp/uecn/AndUEDumper/src/UE/UEGameProfiles/SFG2.hpp
+          python3 ${{ github.workspace }}/patches/patch_library.py
+          python3 ${{ github.workspace }}/patches/patch_toast.py
+          python3 ${{ github.workspace }}/patches/patch_perms.py
+          python3 ${{ github.workspace }}/patches/patch_wrappers.py
+          python3 ${{ github.workspace }}/patches/patch_aimbot_into_dumper.py
+          python3 ${{ github.workspace }}/patches/patch_introspect.py
+          python3 ${{ github.workspace }}/patches/patch_dump_guard.py
+          python3 ${{ github.workspace }}/patches/patch_aimbot_mod.py
+          cd /tmp/uecn/AndUEDumper
+          "$NDK/ndk-build" -j4 -B NDK_PROJECT_PATH=. NDK_APPLICATION_MK=./Application.mk APP_ABI=arm64-v8a APP_OPTIM=release
+          echo "=== built libs ==="
+          find /tmp/uecn/AndUEDumper/libs -type f
+          echo "=== ELF info ==="
+          $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf -h libs/arm64-v8a/libshared_UEDump3r_arm64.so | head -20
+          echo "=== needed libs ==="
+          $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf -d libs/arm64-v8a/libshared_UEDump3r_arm64.so | grep NEEDED
+
+      - name: Clone patchelf
+        run: |
+          git clone --depth 1 https://github.com/NixOS/patchelf.git /tmp/patchelf
+
+      - name: Build patchelf for arm64
+        run: |
+          NDK=/usr/local/lib/android/sdk/ndk/21.4.7075529
+          TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64
+          export CC=$TC/bin/aarch64-linux-android21-clang
+          export CXX=$TC/bin/aarch64-linux-android21-clang++
+          export AR=$TC/bin/aarch64-linux-android-ar
+          export RANLIB=$TC/bin/aarch64-linux-android-ranlib
+          export LDFLAGS="-static"
+          cd /tmp/patchelf
+          autoreconf -fi 2>&1 | tail -5 || true
+          ./configure --host=aarch64-linux-android --prefix=/tmp/patchelf-out LDFLAGS="-static" 2>&1 | tail -10
+          make -j4 2>&1 | tail -15
+          file src/patchelf
+          ls -la src/patchelf
+
+      - name: Stage dumper binaries into APK assets and jniLibs
+        run: |
+          mkdir -p app/src/main/assets/dumper
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          cp /tmp/uecn/AndUEDumper/libs/arm64-v8a/libshared_UEDump3r_arm64.so app/src/main/assets/dumper/ 2>/dev/null || true
+          cp /tmp/uecn/AndUEDumper/libs/arm64-v8a/libshared_UEDump3r_arm64.so app/src/main/jniLibs/arm64-v8a/ 2>/dev/null || true
+          cp /tmp/uecn/AndUEDumper/libs/arm64-v8a/UEDump3r_arm64 app/src/main/assets/dumper/ 2>/dev/null || true
+          cp /tmp/patchelf/src/patchelf app/src/main/assets/dumper/ 2>/dev/null || true
+          ls -la app/src/main/assets/dumper/
+          ls -la app/src/main/jniLibs/arm64-v8a/
+
+      - name: Write signing keystore + embed for in-app APK signing
+        run: |
+          mkdir -p keystore
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > keystore/release.p12
+          echo "keystore bytes: $(wc -c < keystore/release.p12)"
+          mkdir -p app/src/main/assets/keystore
+          cp keystore/release.p12 app/src/main/assets/keystore/release.p12
+          printf '%s' "$KEY_ALIAS" > app/src/main/assets/keystore/alias
+          printf '%s' "$KEYSTORE_PASSWORD" > app/src/main/assets/keystore/storepass
+          printf '%s' "$KEY_PASSWORD" > app/src/main/assets/keystore/keypass
+
+      - name: Set up JDK 8 (for this old AGP 3.5 / Gradle 6.1 toolchain)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      - name: Unit tests (the surgical ZIP patcher)
+        run: |
+          chmod +x ./gradlew
+          ./gradlew testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Build debug APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Verify APK signature
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          APKSIGNER="$(find "$SDK/build-tools" -type f -name apksigner 2>/dev/null | head -1)"
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Stage release artifacts
+        run: |
+          mkdir -p release_artifacts
+          cp app/build/outputs/apk/debug/app-debug.apk release_artifacts/
+          cp /tmp/uecn/AndUEDumper/libs/arm64-v8a/* release_artifacts/ 2>/dev/null || true
+          cp /tmp/patchelf/src/patchelf release_artifacts/ 2>/dev/null || true
+          ls -la release_artifacts/
+
+      - name: Publish to 'latest' release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build
+          make_latest: true
+          files: release_artifacts/*

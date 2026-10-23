@@ -1,0 +1,13 @@
+cocos dumper loaded into the game
+cocos dumper started
+found _ZN7cocos2d11CCFileUtils11getFileDataEPKcS2_Pm in /data/app/com.appsomniacs.mmc-h53swuUQR81aOO01ilwacw==/lib/arm64/libcocos2dcpp.so at 0x7e07be82d4
+getDataFromFile not found
+found _ZN7cocos2d11CCFileUtils11getFileDataEPKcS2_Pm in /data/app/com.appsomniacs.mmc-h53swuUQR81aOO01ilwacw==/lib/arm64/libcocos2dcpp.so at 0x7e07be82d4
+hooked CCFileUtils::getFileData
+found _ZN7cocos2d11CCFileUtils18getFileDataFromZipEPKcS2_Pm in /data/app/com.appsomniacs.mmc-h53swuUQR81aOO01ilwacw==/lib/arm64/libcocos2dcpp.so at 0x7e07be8638
+hooked CCFileUtils::getFileDataFromZip
+found xxtea_decrypt via dlsym at 0x7e078be4b8
+hooked xxtea_decrypt
+hooks: getData=0 getFileData=1 getZipData=1 getString=0 xxtea=1 lua=0
+xxtea_decrypt len=8 key=7374643a3a6d617000736f756e640073
+dumped xxtea_key.txt (32 bytes)

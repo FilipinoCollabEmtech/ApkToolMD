@@ -1,0 +1,139 @@
+<resources>
+    <string name="app_name">ApkToolMD</string>
+
+    <string name="nav_home">Home</string>
+    <string name="nav_debug">Debug</string>
+    <string name="nav_settings">Settings</string>
+    <string name="nav_process_event">ProcessEvt</string>
+
+    <!-- Home -->
+    <string name="import_apk">Import APK</string>
+    <string name="analyze_apk">Analyze</string>
+    <string name="dump_ue4_file">Dump UE4 file</string>
+    <string name="show_dumps">Show dumped scripts</string>
+    <string name="inject_dumper">Inject dumper into the running game (root)</string>
+    <string name="cocos_dumps_title">Dumped scripts</string>
+    <string name="cocos_no_dumps">Nothing dumped yet.\n\nInject the runtime dumper (auto-inject), install the patched game and run it - the dumper writes the decrypted scripts to /sdcard/ApkToolMD/cocos_dump/.</string>
+    <string name="extract_dumper_binary">Extract UE4Dumper binary</string>
+    <string name="check_dumper_status">Check dumper status</string>
+    <string name="test_dumper">Test dumper (load .so)</string>
+    <string name="patch_mode_label">APK PATCH MODE</string>
+    <string name="patch_apk">Patch imported APK</string>
+    <string name="install_patched_apk">Install patched APK</string>
+    <string name="patch_mode_autoinject">Auto-inject (experimental)</string>
+    <string name="patch_mode_signonly">Sign ONLY (the package is not touched)</string>
+    <string name="import_card_title">DETECTED PACKAGE</string>
+    <string name="analyze_label">ENGINE / COMPILER</string>
+    <string name="analyze_idle">Tap Analyze to detect the engine.</string>
+    <string name="analyze_scanning">Scanning…</string>
+    <string name="status_idle">Ready.</string>
+    <string name="status_scanning">Scanning archive…</string>
+    <string name="status_dumping">Dumping UE4 files…</string>
+    <string name="status_done">Done.</string>
+    <string name="dump_done">Dumped %1$d UE4 file(s) to %2$s</string>
+    <string name="dump_none">No UE4 files found in this package.</string>
+
+    <!-- Home menu (the burger button) -->
+    <string name="menu_title">MENU</string>
+    <string name="menu_subtitle">Engine: %1$s</string>
+    <string name="menu_section_engine">ENGINE</string>
+    <string name="menu_section_tools">TOOLS</string>
+    <string name="engine_cocos2d">COCO2D Engine</string>
+    <string name="engine_cocos2d_note">Cocos2d-x resources, scripts and plists</string>
+    <string name="engine_ue4">UE4 ENGINE</string>
+    <string name="engine_ue4_note">Unreal Engine assets plus the live dumper and the aimbot</string>
+    <string name="tool_importer">Importer</string>
+    <string name="tool_importer_note">Pick an APK or an APKS bundle</string>
+    <string name="tool_analyzer">Analyzer</string>
+    <string name="tool_analyzer_note">Detect the engine and dump its assets</string>
+    <string name="tool_patcher">Patcher</string>
+    <string name="tool_patcher_note">Inject the dumper and re-sign the APK</string>
+    <string name="section_importer">IMPORTER</string>
+    <string name="section_analyzer">ANALYZER</string>
+    <string name="section_patcher">PATCHER</string>
+    <string name="engine_label">ENGINE: %1$s</string>
+    <string name="engine_change">CHANGE</string>
+    <string name="engine_matches">matches the selected profile</string>
+    <string name="engine_mismatch">does not match the selected profile</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="pref_appearance">Appearance</string>
+    <string name="pref_dark">Dark theme</string>
+    <string name="pref_dark_summary">Use a darker color palette</string>
+    <string name="pref_notifications">Notifications</string>
+    <string name="pref_notifications_summary">Alerts when a task finishes</string>
+    <string name="pref_beta">Beta features</string>
+    <string name="pref_beta_summary">Try experimental tools early</string>
+    <string name="pref_about">About</string>
+    <string name="about_desc">ApkToolMD 1.0\nAn offline APK inspection toolkit.</string>
+    <string name="action_about">Show about dialog</string>
+
+    <!-- Debug -->
+    <string name="debug_title">Debug</string>
+    <string name="debug_intro">Turn on the floating logger to watch live verbose logs (and the dumper .so) on top of the game.</string>
+    <string name="debug_toggle">Load debug logger</string>
+    <string name="debug_toggle_summary">Draws a floating blob over other apps; tap it to open the console panel.</string>
+    <string name="debug_status_off">Logger off.</string>
+    <string name="debug_status_on">Logger on — floating blob active.</string>
+    <string name="debug_status_denied">Overlay permission denied. Enable "Display over other apps".</string>
+    <string name="debug_need_permission">Grant "Display over other apps" to use the floating logger.</string>
+    <string name="debug_check_connection">Check connection</string>
+    <string name="debug_clear">Clear</string>
+    <string name="debug_hide">Hide</string>
+    <string name="debug_mod_log">Mod log</string>
+    <string name="debug_crash_log">Crash log</string>
+    <string name="debug_console_label">LIVE CONSOLE</string>
+    <string name="debug_channel_name">Debug logger</string>
+    <string name="debug_notif_title">ApkToolMD debug logger</string>
+    <string name="debug_notif_text">Floating console active — tap the blob</string>
+    <string name="debug_stop">Stop</string>
+    <!-- Process Event -->
+    <string name="pe_title">Process Event</string>
+    <string name="pe_import">Import file</string>
+    <string name="pe_find">Find ProcessEvent</string>
+    <string name="pe_idle">Import a file (.so/.hpp/.json/.txt) then tap Find.</string>
+    <string name="pe_scanning">Scanning…</string>
+    <string name="pe_none">No ProcessEvent references found.</string>
+    <!-- Aimbot -->
+    <string name="aimbot_section_title">Aimbot</string>
+    <string name="aimbot_toggle_enabled">Enable Aimbot</string>
+    <string name="aimbot_toggle_head">Head Only</string>
+    <string name="aimbot_toggle_instant">Instant Aim (no smoothing)</string>
+    <string name="aimbot_toggle_autofire">Auto-Fire on Head</string>
+    <string name="inject_aimbot">Inject Aimbot (ptrace)</string>
+    <string name="aimbot_toggle_gameassist">Disable built-in game aim assist</string>
+    <string name="aimbot_toggle_engineaim">Drive rotation directly (engine path)</string>
+    <string name="aimbot_toggle_bones">Real skeleton ESP (engine bones - risky)</string>
+    <string name="aimbot_toggle_nospread">Remove bullet spread (no recoil)</string>
+    <string name="aimbot_headz_label">Head height: %1$s</string>
+    <string name="aimbot_toggle_esp">Show distance ESP (metres)</string>
+    <string name="aimbot_toggle_skipdead">Skip dead bodies</string>
+    <string name="aimbot_toggle_skipteam">Skip teammates</string>
+
+    <!-- Aim loader -->
+    <string name="aim_loader_title">Aim Loader (Cocos2D)</string>
+    <string name="aim_loader_subtitle">Memory address the cocos_dumper.so writes aim angle to. Find it via analysis scripts, enter hex (e.g. 7fxxxxxx), then tap Apply. The .so reads this file on game start.</string>
+    <string name="aim_addr_hint">Aim offset address (hex, e.g. 7fabc123)</string>
+    <string name="aim_enable">Enable aim write</string>
+    <string name="aim_apply">Apply</string>
+
+    <!-- Shadow + remap loader (the R3DNETWORK/LGL mod architecture) -->
+    <string name="menu_section_mod">MOD</string>
+    <string name="tool_shadow_loader">Shadow Loader</string>
+    <string name="tool_shadow_loader_note">Load modded classes from a shadow DEX/APK with package remapping</string>
+    <string name="section_shadow_loader">SHADOW + REMAP LOADER</string>
+    <string name="shadow_pick">Pick shadow DEX / APK</string>
+    <string name="shadow_rules_label">Remap rules (from=to, one per line; prefix with r: for regex)</string>
+    <string name="shadow_load">Load shadow loader</string>
+    <string name="shadow_class_label">Class to test (e.g. com.mod.shadow.PlayerController)</string>
+    <string name="shadow_test">Load &amp; instantiate class</string>
+    <string name="shadow_status_label">Shadow loader status</string>
+    <string name="shadow_loaded">Shadow loader ready</string>
+    <string name="shadow_not_loaded">Shadow loader not loaded</string>
+    <string name="shadow_no_file">Pick a shadow DEX/APK first</string>
+    <string name="shadow_load_ok">Shadow loader loaded (%1$d rule(s))</string>
+    <string name="shadow_load_fail">Failed to load shadow loader: %1$s</string>
+    <string name="shadow_instance_ok">Instantiated %1$s</string>
+    <string name="shadow_instance_fail">Could not instantiate %1$s: %2$s</string>
+</resources>
