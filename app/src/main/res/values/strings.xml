@@ -11,17 +11,11 @@
     <string name="analyze_apk">Analyze</string>
     <string name="dump_ue4_file">Dump UE4 file</string>
     <string name="show_dumps">Show dumped scripts</string>
-    <string name="inject_dumper">Inject dumper into the running game (root)</string>
     <string name="cocos_dumps_title">Dumped scripts</string>
     <string name="cocos_no_dumps">Nothing dumped yet.\n\nInject the runtime dumper (auto-inject), install the patched game and run it - the dumper writes the decrypted scripts to /sdcard/ApkToolMD/cocos_dump/.</string>
     <string name="extract_dumper_binary">Extract UE4Dumper binary</string>
     <string name="check_dumper_status">Check dumper status</string>
     <string name="test_dumper">Test dumper (load .so)</string>
-    <string name="patch_mode_label">APK PATCH MODE</string>
-    <string name="patch_apk">Patch imported APK</string>
-    <string name="install_patched_apk">Install patched APK</string>
-    <string name="patch_mode_autoinject">Auto-inject (experimental)</string>
-    <string name="patch_mode_signonly">Sign ONLY (the package is not touched)</string>
     <string name="import_card_title">DETECTED PACKAGE</string>
     <string name="analyze_label">ENGINE / COMPILER</string>
     <string name="analyze_idle">Tap Analyze to detect the engine.</string>
@@ -46,11 +40,8 @@
     <string name="tool_importer_note">Pick an APK or an APKS bundle</string>
     <string name="tool_analyzer">Analyzer</string>
     <string name="tool_analyzer_note">Detect the engine and dump its assets</string>
-    <string name="tool_patcher">Patcher</string>
-    <string name="tool_patcher_note">Inject the dumper and re-sign the APK</string>
     <string name="section_importer">IMPORTER</string>
     <string name="section_analyzer">ANALYZER</string>
-    <string name="section_patcher">PATCHER</string>
     <string name="engine_label">ENGINE: %1$s</string>
     <string name="engine_change">CHANGE</string>
     <string name="engine_matches">matches the selected profile</string>
@@ -95,22 +86,6 @@
     <string name="pe_idle">Import a file (.so/.hpp/.json/.txt) then tap Find.</string>
     <string name="pe_scanning">Scanning…</string>
     <string name="pe_none">No ProcessEvent references found.</string>
-    <!-- Aimbot -->
-    <string name="aimbot_section_title">Aimbot</string>
-    <string name="aimbot_toggle_enabled">Enable Aimbot</string>
-    <string name="aimbot_toggle_head">Head Only</string>
-    <string name="aimbot_toggle_instant">Instant Aim (no smoothing)</string>
-    <string name="aimbot_toggle_autofire">Auto-Fire on Head</string>
-    <string name="inject_aimbot">Inject Aimbot (ptrace)</string>
-    <string name="aimbot_toggle_gameassist">Disable built-in game aim assist</string>
-    <string name="aimbot_toggle_engineaim">Drive rotation directly (engine path)</string>
-    <string name="aimbot_toggle_bones">Real skeleton ESP (engine bones - risky)</string>
-    <string name="aimbot_toggle_nospread">Remove bullet spread (no recoil)</string>
-    <string name="aimbot_headz_label">Head height: %1$s</string>
-    <string name="aimbot_toggle_esp">Show distance ESP (metres)</string>
-    <string name="aimbot_toggle_skipdead">Skip dead bodies</string>
-    <string name="aimbot_toggle_skipteam">Skip teammates</string>
-
     <!-- Aim loader -->
     <string name="aim_loader_title">Aim Loader (Cocos2D)</string>
     <string name="aim_loader_subtitle">Memory address the cocos_dumper.so writes aim angle to. Find it via analysis scripts, enter hex (e.g. 7fxxxxxx), then tap Apply. The .so reads this file on game start.</string>

@@ -15,18 +15,13 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ScrollView
 import android.widget.LinearLayout
-import android.widget.ArrayAdapter
 import android.widget.ProgressBar
-import android.widget.Spinner
 import android.widget.TextView
 import androidx.fragment.app.Fragment
-import androidx.core.content.FileProvider
 import androidx.core.widget.NestedScrollView
-import com.android.apksig.ApkSigner
 import com.fluxin.apktoolmd.R
 import com.fluxin.apktoolmd.mod.RemapRule
 import com.fluxin.apktoolmd.mod.ShadowLoader
-import com.fluxin.apktoolmd.util.SurgicalZip
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.card.MaterialCardView
@@ -37,9 +32,6 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
-import java.security.KeyStore
-import java.security.PrivateKey
-import java.security.cert.X509Certificate
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
@@ -62,14 +54,9 @@ class HomeFragment : Fragment() {
     private lateinit var analyzeButton: MaterialButton
     private lateinit var dumpButton: MaterialButton
     private lateinit var showDumpsButton: MaterialButton
-    private lateinit var injectDumperButton: MaterialButton
     private lateinit var extractDumperButton: MaterialButton
     private lateinit var checkStatusButton: MaterialButton
     private lateinit var testDumperButton: MaterialButton
-    private lateinit var patchModeSpinner: Spinner
-    private lateinit var patchApkButton: MaterialButton
-    private lateinit var installPatchedButton: MaterialButton
-    private lateinit var injectAimbotButton: MaterialButton
     private lateinit var analyzeResult: TextView
     private lateinit var analyzeEvidence: TextView
     private lateinit var statusView: TextView
@@ -81,7 +68,6 @@ class HomeFragment : Fragment() {
     private lateinit var scroll: NestedScrollView
 
     private var selectedUris: List<Uri> = emptyList()
-    private var signedApkFile: File? = null
 
     // ------------------------------------------------------------ shadow loader
     private lateinit var shadowPick: MaterialButton
@@ -114,14 +100,9 @@ class HomeFragment : Fragment() {
         analyzeButton = view.findViewById(R.id.analyze_apk)
         dumpButton = view.findViewById(R.id.dump_ue4)
         showDumpsButton = view.findViewById(R.id.show_dumps)
-        injectDumperButton = view.findViewById(R.id.inject_dumper)
         extractDumperButton = view.findViewById(R.id.extract_dumper)
         checkStatusButton = view.findViewById(R.id.check_dumper_status)
         testDumperButton = view.findViewById(R.id.test_dumper)
-        patchModeSpinner = view.findViewById(R.id.patch_mode)
-        patchApkButton = view.findViewById(R.id.patch_apk)
-        installPatchedButton = view.findViewById(R.id.install_patched)
-        injectAimbotButton = view.findViewById(R.id.inject_aimbot)
         analyzeResult = view.findViewById(R.id.analyze_result)
         analyzeEvidence = view.findViewById(R.id.analyze_evidence)
         statusView = view.findViewById(R.id.status_text)
@@ -145,14 +126,6 @@ class HomeFragment : Fragment() {
         analyzeButton.setOnClickListener { analyze() }
         dumpButton.setOnClickListener { dumpUe4() }
         showDumpsButton.setOnClickListener { showDumps() }
-        injectDumperButton.setOnClickListener { injectDumper() }
-        extractDumperButton.setOnClickListener { extractDumper() }
-        checkStatusButton.setOnClickListener { checkDumperStatus() }
-        testDumperButton.setOnClickListener { testDumper() }
-        engineChange.setOnClickListener { openMenuPanel() }
-        patchApkButton.setOnClickListener { patchApk() }
-        installPatchedButton.setOnClickListener { installPatched() }
-        injectAimbotButton.setOnClickListener { injectAimbot() }
         shadowPick.setOnClickListener { pickShadow() }
         shadowLoad.setOnClickListener { loadShadowLoader() }
         shadowTest.setOnClickListener { testShadowClass() }
@@ -189,10 +162,6 @@ class HomeFragment : Fragment() {
         sheetView.findViewById<View>(R.id.tool_analyzer).setOnClickListener {
             sheet.dismiss()
             scrollToSection(R.id.section_analyzer)
-        }
-        sheetView.findViewById<View>(R.id.tool_patcher).setOnClickListener {
-            sheet.dismiss()
-            scrollToSection(R.id.section_patcher)
         }
 
         sheet.show()
@@ -237,96 +206,18 @@ class HomeFragment : Fragment() {
             dumpButton,
             extractDumperButton,
             checkStatusButton,
-            testDumperButton,
-            injectAimbotButton
+            testDumperButton
         )
         for (v in ue4Only) v.visibility = if (unreal) View.VISIBLE else View.GONE
         showDumpsButton.visibility = if (profile == EngineProfile.COCOS2D) View.VISIBLE else View.GONE
-        injectDumperButton.visibility = if (profile == EngineProfile.COCOS2D) View.VISIBLE else View.GONE
-
-        // the auto-inject patch mode patches libUE4.so - Unreal only
-        patchModeSpinner.adapter = ArrayAdapter(
-            ctx,
-            android.R.layout.simple_spinner_dropdown_item,
-            patchModes(profile)
-        )
 
         engineLabel.text = getString(R.string.engine_label, profile.label)
-    }
-
-    private fun patchModes(profile: EngineProfile): Array<String> {
-        val modes = ArrayList<String>()
-        // the auto-inject patches the game's own .so - Unreal or Cocos2d
-        if (profile.isUnreal || profile == EngineProfile.COCOS2D) {
-            modes.add(getString(R.string.patch_mode_autoinject))
-        }
-        // sign the ORIGINAL package without touching a single entry - that is
-        // what a normal signer (MT Manager, apksigner) does
-        modes.add(getString(R.string.patch_mode_signonly))
-        return modes.toTypedArray()
     }
 
     /** Scroll the home screen to one of its sections. */
     private fun scrollToSection(id: Int) {
         val target = view?.findViewById<View>(id) ?: return
         scroll.post { scroll.smoothScrollTo(0, target.top) }
-    }
-
-    /** Inject aimbot .so into running game via ptrace. */
-    private fun injectAimbot() {
-        val root = view ?: return
-        if (selectedUris.isEmpty()) {
-            showSnack(root, "Import an APK first to identify the game")
-            return
-        }
-        log("== Inject Aimbot ==")
-        statusView.text = "Injecting aimbot..."
-        progressBar.visibility = View.VISIBLE
-
-        val appContext = requireContext().applicationContext
-        Thread {
-            var message = "Injection failed"
-            try {
-                // 1. Copy aimbot_mod.so to /sdcard/aimbot_mod.so
-                val aimbotDest = File("/sdcard/aimbot_mod.so")
-                appContext.assets.open("mod/libaimbot_mod.so").use { input ->
-                    FileOutputStream(aimbotDest).use { out -> input.copyTo(out) }
-                }
-                log("copied aimbot_mod.so to ${aimbotDest.absolutePath}")
-                
-                // 2. Copy ptrace_injector to app private dir and make executable
-                val injectorDest = File(appContext.filesDir, "ptrace_injector")
-                appContext.assets.open("bin/ptrace_injector").use { input ->
-                    FileOutputStream(injectorDest).use { out -> input.copyTo(out) }
-                }
-                injectorDest.setExecutable(true, false)
-                log("copied ptrace_injector to ${injectorDest.absolutePath}")
-                
-                // 3. Run injector with su (requires root)
-                val pb = ProcessBuilder("su", "-c", "${injectorDest.absolutePath} ${aimbotDest.absolutePath}")
-                val proc = pb.start()
-                val out = proc.inputStream.bufferedReader().readText()
-                val err = proc.errorStream.bufferedReader().readText()
-                proc.waitFor()
-                log("injector exit code: ${proc.exitValue()}")
-                if (out.isNotBlank()) log("stdout: $out")
-                if (err.isNotBlank()) log("stderr: $err")
-                
-                if (proc.exitValue() == 0) {
-                    message = "Aimbot injected successfully"
-                } else {
-                    message = "Injection failed (exit ${proc.exitValue()}): $err"
-                }
-            } catch (e: Throwable) {
-                log("ERROR: $e")
-                message = "Injection error: ${e.message}"
-            }
-            root.post {
-                statusView.text = message
-                progressBar.visibility = View.GONE
-                showSnack(root, message)
-            }
-        }.start()
     }
 
     /** Open the system file picker, allowing one APK or a multi-file .apks/.split set. */
@@ -1011,275 +902,7 @@ class HomeFragment : Fragment() {
             }
         }
     }
-
-    private fun patchApk() {
-        val root = view ?: return
-        if (selectedUris.isEmpty()) {
-            showSnack(root, "Import an APK first")
-            return
-        }
-        // the mode list depends on the engine, so compare the text and not
-        // the position
-        val signOnly = patchModeSpinner.selectedItem?.toString() == getString(R.string.patch_mode_signonly)
-        consoleLog.text = ""
-        statusView.text = "Patching…"
-        progressBar.visibility = View.VISIBLE
-        val appContext = requireContext().applicationContext
-        log("== Patch APK ==")
-        log("mode: ${if (signOnly) "sign only" else "auto-inject"}")
-        log("input: ${selectedUris.first()}")
-        Thread {
-            var message: String
-            try {
-                // extract dumper .so to /sdcard
-                val outDir = File("/sdcard/ApkToolMD/dumper").apply { mkdirs() }
-                val am = appContext.assets
-                val names = am.list("dumper") ?: emptyArray()
-                log("assets/dumper: ${if (names.isEmpty()) "(empty)" else names.joinToString(", ")}")
-                for (n in names) {
-                    am.open("dumper/$n").use { input ->
-                        FileOutputStream(File(outDir, n)).use { o -> input.copyTo(o) }
-                    }
-                }
-                val soPath = File(outDir, "libshared_UEDump3r_arm64.so").absolutePath
-                if (EngineProfile.current(requireContext()) == EngineProfile.COCOS2D) {
-                    // the cocos runtime dumper travels with the app
-                    appContext.assets.open("mod/libcocos_dumper.so").use { input ->
-                        FileOutputStream(File(outDir, "libcocos_dumper.so")).use { o -> input.copyTo(o) }
-                    }
-                    log("extracted libcocos_dumper.so to $outDir")
-                }
-                if (signOnly) {
-                    // Sign the original package as it is - no re-pack, no
-                    // library is touched.  This is what a normal signer does.
-                    log("== Sign only (the package is not touched) ==")
-                    val workDir = File("/sdcard/ApkToolMD/patch_work").apply { deleteRecursively(); mkdirs() }
-                    val apkFile = File(workDir, "input.apk")
-                    appContext.contentResolver.openInputStream(selectedUris.first())?.use { input ->
-                        FileOutputStream(apkFile).use { out -> input.copyTo(out) }
-                    }
-                    log("original APK: ${apkFile.length()} bytes")
-                    try {
-                        val signedApk = File("/sdcard/ApkToolMD", "patched-signed.apk")
-                        signApk(appContext, apkFile, signedApk)
-                        log("signed APK: ${signedApk.absolutePath} (${signedApk.length()} bytes)")
-                        signedApkFile = signedApk
-                        message = "Signed (nothing changed):\n${signedApk.absolutePath}"
-                        root.post {
-                            installPatchedButton.visibility = View.VISIBLE
-                            installPatchedButton.isEnabled = true
-                        }
-                    } catch (se: Throwable) {
-                        log("ERROR: signing failed: ${se}")
-                        message = "Signing failed: ${se.message}"
-                    }
-                } else {
-                    log("== Auto-inject mode (in-memory) ==")
-                    val workDir = File("/sdcard/ApkToolMD/patch_work").apply { deleteRecursively(); mkdirs() }
-                    val apkFile = File(workDir, "input.apk")
-                    log("copying imported APK...")
-                    appContext.contentResolver.openInputStream(selectedUris.first())?.use { input ->
-                        FileOutputStream(apkFile).use { out -> input.copyTo(out) }
-                    }
-                    log("original APK: ${apkFile.length()} bytes")
-                    log("extracting patchelf to internal storage...")
-                    val patchelf = File(appContext.filesDir, "patchelf").apply { delete() }
-                    appContext.assets.open("dumper/patchelf").use { input ->
-                        FileOutputStream(patchelf).use { out -> input.copyTo(out) }
-                    }
-                    patchelf.setExecutable(true, false)
-                    var targetLibName: String? = null
-                    var payloadName = "libshared_UEDump3r_arm64.so"
-                    var payloadAsset = "dumper/libshared_UEDump3r_arm64.so"
-                    var origEntryCount = 0
-                    ZipFile(apkFile).use { zf ->
-                        val entries = zf.entries().asSequence().map { it.name }.toList()
-                        origEntryCount = entries.size
-                        log("original APK has ${entries.size} entries")
-                        val target = injectionTarget(entries)
-                        if (target != null) {
-                            targetLibName = target.libEntry
-                            payloadName = target.payloadName
-                            payloadAsset = target.payloadAsset
-                        }
-                    }
-                    var dumperSoBytes = ByteArray(0)
-                    if (!signOnly) {
-                        dumperSoBytes = appContext.assets.open(payloadAsset).use { it.readBytes() }
-                        log("loaded payload $payloadName: ${dumperSoBytes.size} bytes")
-                    } else {
-                        log("sign only: the package is not touched")
-                    }
-                    if (targetLibName == null && !signOnly) {
-                        log("ERROR: no hookable library in the APK")
-                        message = "No ${hookHint()} found in APK. Auto-inject failed."
-                    } else {
-                        log("target lib: $targetLibName")
-                        val targetLibFile = File(workDir, "target_lib.so")
-                        ZipFile(apkFile).use { zf ->
-                            val entry = zf.getEntry(targetLibName)
-                            zf.getInputStream(entry).use { input ->
-                                FileOutputStream(targetLibFile).use { out -> input.copyTo(out) }
-                            }
-                        }
-                        log("extracted target lib: ${targetLibFile.length()} bytes")
-                        log("running patchelf --add-needed ...")
-                        val pb = ProcessBuilder(patchelf.absolutePath, "--add-needed", payloadName, targetLibFile.absolutePath)
-                        pb.directory(workDir)
-                        val proc = pb.start()
-                        val err = proc.errorStream.bufferedReader().readText()
-                        val out = proc.inputStream.bufferedReader().readText()
-                        proc.waitFor()
-                        log("patchelf exit code: ${proc.exitValue()}")
-                        if (err.isNotBlank()) log("stderr: $err")
-                        if (out.isNotBlank()) log("stdout: $out")
-                        if (proc.exitValue() != 0) {
-                            message = "patchelf failed (exit ${proc.exitValue()}): $err"
-                        } else {
-                            log("verifying patch...")
-                            val verifyPb = ProcessBuilder(patchelf.absolutePath, "--print-needed", targetLibFile.absolutePath)
-                            val verifyProc = verifyPb.start()
-                            val verifyOut = verifyProc.inputStream.bufferedReader().readText()
-                            verifyProc.waitFor()
-                            log("needed libs after patch:\n$verifyOut")
-                            val patchedLibBytes = targetLibFile.readBytes()
-                            log("patched lib size: ${patchedLibBytes.size} bytes")
-                            // The surgical patch: every entry of the original
-                            // package is copied VERBATIM (local header +
-                            // compressed data), only the engine library is
-                            // replaced and the payload is added.  A full
-                            // re-pack changes the compression of the entries
-                            // and that is enough to kill the game.
-                            log("patching the APK in place (the other entries stay byte identical)...")
-                            val outApk = File("/sdcard/ApkToolMD", "patched.apk").apply { parentFile?.mkdirs() }
-                            val replaceMap = HashMap<String, ByteArray>()
-                            replaceMap[targetLibName ?: ""] = patchedLibBytes
-                            val addMap = HashMap<String, ByteArray>()
-                            addMap["lib/arm64-v8a/$payloadName"] = dumperSoBytes
-                            val patchErr = SurgicalZip.patch(apkFile, outApk, replaceMap, addMap)
-                            if (patchErr != null) {
-                                log("ERROR: the surgical patch failed: $patchErr")
-                                message = "Patch failed: $patchErr"
-                                throw RuntimeException(patchErr)
-                            }
-                            log("patched: ${outApk.length()} bytes (was ${apkFile.length()})")
-                            log("patched APK size: ${outApk.length()} bytes")
-                            log("native lib alignment (must be mod4096=0):")
-                            libAlignments(outApk).forEach { log("  $it") }
-                            try {
-                                ZipFile(outApk).use { zf ->
-                                    log("validation: APK opens as zip, ${zf.size()} entries")
-                                }
-                            } catch (e: Throwable) {
-                                log("validation FAILED: $e")
-                            }
-                            log("signing patched APK...")
-                            val signedApk = File("/sdcard/ApkToolMD", "patched-signed.apk")
-                            try {
-                                signApk(appContext, outApk, signedApk)
-                                log("signed APK: ${signedApk.absolutePath} (${signedApk.length()} bytes)")
-                                try {
-                                    ZipFile(signedApk).use { zf ->
-                                        log("signed APK validation: ${zf.size()} entries")
-                                    }
-                                } catch (e: Throwable) {
-                                    log("signed APK zip check failed: $e")
-                                }
-                                signedApkFile = signedApk
-                                message = "Patched + signed APK:\n${signedApk.absolutePath}\nReady to install."
-                                root.post {
-                                    installPatchedButton.visibility = View.VISIBLE
-                                    installPatchedButton.isEnabled = true
-                                }
-                            } catch (se: Throwable) {
-                                log("ERROR: signing failed: ${se}")
-                                log(se.stackTrace.joinToString("\n"))
-                                signedApkFile = outApk
-                                message = "Patched (unsigned): ${outApk.absolutePath}\nSigning failed: ${se.message}"
-                            }
-                        }
-                    }
-                }
-            } catch (e: Throwable) {
-                log("EXCEPTION: ${e}")
-                log(e.stackTrace.joinToString("\n"))
-                message = "Patch failed: ${e}"
-            }
-            root.post {
-                statusView.text = message
-                progressBar.visibility = View.GONE
-                showSnack(root, message)
-            }
-        }.start()
-    }
-
-    /** Sign an APK with the keystore embedded in the app assets (v1 + v2 scheme). */
-    private fun signApk(context: Context, unsigned: File, signed: File) {
-        val ksDir = File(context.cacheDir, "ks").apply { mkdirs() }
-        val ksFile = File(ksDir, "release.p12")
-        context.assets.open("keystore/release.p12").use { ins ->
-            FileOutputStream(ksFile).use { outs -> ins.copyTo(outs) }
-        }
-        val alias = context.assets.open("keystore/alias").bufferedReader().readText().trim()
-        val storePass = context.assets.open("keystore/storepass").bufferedReader().readText().trim()
-        val keyPass = context.assets.open("keystore/keypass").bufferedReader().readText().trim()
-
-        val keyStore = KeyStore.getInstance("PKCS12")
-        FileInputStream(ksFile).use { keyStore.load(it, storePass.toCharArray()) }
-        val keyAlias = if (alias.isNotEmpty() && keyStore.containsAlias(alias)) alias
-        else keyStore.aliases().nextElement()
-        val privateKey = keyStore.getKey(keyAlias, keyPass.toCharArray()) as PrivateKey
-        val cert = keyStore.getCertificate(keyAlias) as X509Certificate
-
-        val signerConfig = ApkSigner.SignerConfig.Builder(
-            "apktoolmd",
-            privateKey,
-            listOf(cert)
-        ).build()
-
-        if (signed.exists()) signed.delete()
-        ApkSigner.Builder(listOf(signerConfig))
-            .setInputApk(unsigned)
-            .setOutputApk(signed)
-            .setV1SigningEnabled(true)
-            .setV2SigningEnabled(true)
-            // MT Manager (and the other normal signers) also write the v3
-            // block - a game that checks the signing block sees the same
-            // shape as it does with a normal signer.
-            .setV3SigningEnabled(true)
-            .build()
-            .sign()
-    }
-
-    /** Launch the system package installer for the patched+signed APK. */
-    private fun installPatched() {
-        val root = view ?: return
-        val apk = signedApkFile
-        if (apk == null || !apk.exists()) {
-            showSnack(root, "No patched APK yet. Patch an APK first.")
-            return
-        }
-        log("== Install patched APK ==")
-        log("apk: ${apk.absolutePath} (${apk.length()} bytes)")
-        try {
-            val uri = FileProvider.getUriForFile(
-                requireContext(),
-                requireContext().packageName + ".fileprovider",
-                apk
-            )
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "application/vnd.android.package-archive")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            startActivity(intent)
-            log("package installer launched")
-        } catch (e: Throwable) {
-            log("ERROR: install intent failed: $e")
-            log(e.stackTrace.joinToString("\n"))
-            showSnack(root, "Install failed: ${e.message}")
-        }
-    }
+    // ------------------------------------------------------- cocos2d scripts
 
     private fun isUe4Entry(name: String): Boolean {
         val n = name.toLowerCase()
@@ -1288,128 +911,6 @@ class HomeFragment : Fragment() {
             n.contains("assets/ue4/")
     }
 
-    /** What we inject and into which library - it depends on the engine. */
-    private data class InjectionTarget(val libEntry: String, val payloadName: String, val payloadAsset: String)
-
-    private val cocosLibs = arrayOf(
-        "libcocos2dcpp.so", "libcocos2djs.so", "libcocos2dlua.so",
-        "libcocos2d.so", "libcocos.so", "libgame.so"
-    )
-
-    private fun injectionTarget(entries: List<String>): InjectionTarget? {
-        val profile = EngineProfile.current(requireContext())
-        if (profile.isUnreal) {
-            val lib = when {
-                entries.contains("lib/arm64-v8a/libUE4.so") -> "lib/arm64-v8a/libUE4.so"
-                entries.contains("lib/arm64-v8a/libUnreal.so") -> "lib/arm64-v8a/libUnreal.so"
-                else -> null
-            }
-            return lib?.let {
-                InjectionTarget(it, "libshared_UEDump3r_arm64.so", "dumper/libshared_UEDump3r_arm64.so")
-            }
-        }
-        if (profile == EngineProfile.COCOS2D) {
-            val lib = entries.firstOrNull { e ->
-                e.startsWith("lib/arm64-v8a/") && cocosLibs.any { e.endsWith(it) }
-            }
-            return lib?.let {
-                InjectionTarget(it, "libcocos_dumper.so", "mod/libcocos_dumper.so")
-            }
-        }
-        return null
-    }
-
-    private fun hookHint(): String {
-        val profile = EngineProfile.current(requireContext())
-        return if (profile.isUnreal) "libUE4.so/libUnreal.so" else cocosLibs.joinToString("/")
-    }
-
-    // ------------------------------------------------------- cocos2d scripts
-
-
-    /**
-     * Load the dumper into the RUNNING game with root.
-     *
-     * The game, its APK and its libraries are not touched: the .so is copied
-     * next to the game's own library and then loaded into the running
-     * process with ptrace (the classic remote dlopen).  Nothing in the
-     * package changes, so the game cannot detect it.
-     */
-    private fun injectDumper() {
-        val root = view ?: return
-        val appContext = requireContext().applicationContext
-        statusView.text = "Injecting the dumper..."
-        progressBar.visibility = View.VISIBLE
-        consoleLog.text = ""
-        log("== Inject the dumper into the running game (root) ==")
-        val filesDir = appContext.filesDir
-        Thread {
-            var message: String? = null
-            try {
-                val injector = File(filesDir, "ptrace_injector")
-                val payload = File(filesDir, "libcocos_dumper.so")
-                appContext.assets.open("bin/ptrace_injector").use { input ->
-                    FileOutputStream(injector).use { o -> input.copyTo(o) }
-                }
-                injector.setExecutable(true, false)
-                appContext.assets.open("mod/libcocos_dumper.so").use { input ->
-                    FileOutputStream(payload).use { o -> input.copyTo(o) }
-                }
-                payload.setReadable(true, false)
-                log("injector: ${injector.length()} bytes, payload: ${payload.length()} bytes")
-
-                val script = """
-                    set -e
-                    LIBDIR=''
-                    for d in /data/app/*/lib/arm64; do
-                      [ -d "@D@d" ] || continue
-                      for n in libcocos2dcpp.so libcocos2djs.so libcocos2dlua.so libcocos.so libgame.so; do
-                        if [ -f "@D@d/@D@n" ]; then LIBDIR="@D@d"; LIB="@D@n"; break; fi
-                      done
-                      if [ -n "@D@LIBDIR" ]; then break; fi
-                    done
-                    if [ -z "@D@LIBDIR" ]; then echo NO_GAME_LIB; exit 3; fi
-                    echo "lib dir: @D@LIBDIR  lib: @D@LIB"
-                    cp "@PAYLOAD@" "@D@LIBDIR/libcocos_dumper.so"
-                    chmod 755 "@D@LIBDIR/libcocos_dumper.so"
-                    chown --reference="@D@LIBDIR/@D@LIB" "@D@LIBDIR/libcocos_dumper.so" 2>/dev/null || true
-                    restorecon "@D@LIBDIR/libcocos_dumper.so" 2>/dev/null || true
-                    "@INJECTOR@" "@D@LIBDIR/libcocos_dumper.so" "@D@LIB"
-                """.trimIndent()
-                    .replace("@D@", "$")
-                    .replace("@PAYLOAD@", payload.absolutePath)
-                    .replace("@INJECTOR@", injector.absolutePath)
-                val scriptFile = File(filesDir, "inject_dumper.sh")
-                scriptFile.writeText(script)
-
-                val pb = ProcessBuilder("su", "-c", "sh ${scriptFile.absolutePath}")
-                val proc = pb.start()
-                val out = proc.inputStream.bufferedReader().readText()
-                val err = proc.errorStream.bufferedReader().readText()
-                proc.waitFor()
-                if (out.isNotBlank()) log(out.trim())
-                if (err.isNotBlank()) log("stderr: ${err.trim()}")
-                log("exit code: ${proc.exitValue()}")
-                if (out.contains("injection is done") || out.contains("dlopen")) {
-                    message = "Injected - the dumper is in the game now."
-                } else if (out.contains("NO_GAME_LIB")) {
-                    message = "The game does not seem to be installed."
-                } else {
-                    message = "Injection failed: ${err.trim().ifBlank { out.trim() }}"
-                }
-            } catch (e: Throwable) {
-                log("ERROR: $e")
-                log(e.stackTrace.joinToString("\n"))
-                message = "Failed: ${e.message}"
-            }
-            root.post {
-                progressBar.visibility = View.GONE
-                val done = message ?: "Done"
-                statusView.text = done
-                showSnack(root, done)
-            }
-        }.start()
-    }
 
     /** List what the runtime dumper wrote. */
     private fun showDumps() {
