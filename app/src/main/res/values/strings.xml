@@ -93,6 +93,13 @@
     <string name="aim_enable">Enable aim write</string>
     <string name="aim_apply">Apply</string>
 
+    <!-- Aim loader -->
+    <string name="aim_loader_title">Aim Loader (Cocos2D)</string>
+    <string name="aim_loader_subtitle">Memory address the cocos_dumper.so writes aim angle to. Find it via analysis scripts, enter hex (e.g. 7fxxxxxx), then tap Apply. The .so reads this file on game start.</string>
+    <string name="aim_addr_hint">Aim offset address (hex, e.g. 7fabc123)</string>
+    <string name="aim_enable">Enable aim write</string>
+    <string name="aim_apply">Apply</string>
+
     <!-- Shadow + remap loader (the R3DNETWORK/LGL mod architecture) -->
     <string name="menu_section_mod">MOD</string>
     <string name="tool_shadow_loader">Shadow Loader</string>
