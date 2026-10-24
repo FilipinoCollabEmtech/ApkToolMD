@@ -28,13 +28,21 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         // Start R3DNETWORK mod menu (loads libmodmenu.so + installs hooks)
-        ModMenuLoader.start(this)
+        try {
+            ModMenuLoader.start(this)
+        } catch (e: Exception) {
+            // Ignore - mod menu is optional
+        }
 
-        // Start floating mod menu overlay service
-        val intent = Intent(this, ModMenuOverlayService::class.java)
-        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.SYSTEM_ALERT_WINDOW)
-            == PackageManager.PERMISSION_GRANTED) {
-            startService(intent)
+        // Start floating mod menu overlay service only if overlay permission granted
+        try {
+            val intent = Intent(this, ModMenuOverlayService::class.java)
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.SYSTEM_ALERT_WINDOW)
+                == PackageManager.PERMISSION_GRANTED) {
+                startService(intent)
+            }
+        } catch (e: Exception) {
+            // Ignore - overlay service is optional
         }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)

@@ -52,41 +52,45 @@ class ModMenuOverlayService : Service() {
     }
 
     private fun showBubble() {
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        bubbleView = LayoutInflater.from(this).inflate(R.layout.modmenu_bubble, null)
+        try {
+            windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+            bubbleView = LayoutInflater.from(this).inflate(R.layout.modmenu_bubble, null)
 
-        windowManagerLayoutParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        )
-        windowManagerLayoutParams!!.gravity = Gravity.TOP or Gravity.LEFT
-        windowManagerLayoutParams!!.x = 50
-        windowManagerLayoutParams!!.y = 200
+            windowManagerLayoutParams = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+            )
+            windowManagerLayoutParams!!.gravity = Gravity.TOP or Gravity.LEFT
+            windowManagerLayoutParams!!.x = 50
+            windowManagerLayoutParams!!.y = 200
 
-        bubbleView?.setOnTouchListener { _, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    initialX = windowManagerLayoutParams!!.x.toFloat()
-                    initialY = windowManagerLayoutParams!!.y.toFloat()
-                    initialTouchX = event.rawX
-                    initialTouchY = event.rawY
-                    togglePanel()
-                    false
+            bubbleView?.setOnTouchListener { _, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        initialX = windowManagerLayoutParams!!.x.toFloat()
+                        initialY = windowManagerLayoutParams!!.y.toFloat()
+                        initialTouchX = event.rawX
+                        initialTouchY = event.rawY
+                        togglePanel()
+                        false
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        windowManagerLayoutParams!!.x = (initialX + (event.rawX - initialTouchX)).toInt()
+                        windowManagerLayoutParams!!.y = (initialY + (event.rawY - initialTouchY)).toInt()
+                        windowManager!!.updateViewLayout(bubbleView, windowManagerLayoutParams)
+                        true
+                    }
+                    else -> false
                 }
-                MotionEvent.ACTION_MOVE -> {
-                    windowManagerLayoutParams!!.x = (initialX + (event.rawX - initialTouchX)).toInt()
-                    windowManagerLayoutParams!!.y = (initialY + (event.rawY - initialTouchY)).toInt()
-                    windowManager!!.updateViewLayout(bubbleView, windowManagerLayoutParams)
-                    true
-                }
-                else -> false
             }
-        }
 
-        windowManager!!.addView(bubbleView, windowManagerLayoutParams)
+            windowManager!!.addView(bubbleView, windowManagerLayoutParams)
+        } catch (e: Exception) {
+            // Ignore - bubble overlay is optional
+        }
     }
 
     private fun hideBubble() {
