@@ -153,11 +153,9 @@ object ModMenuLoader {
     private external fun nativeGetFOV(): Float
     //endregion
 
-    companion object {
-        @JvmStatic
-        fun start(context: Context) {
-            // Library is loaded in init block; hook thread starts in JNI_OnLoad
-            Log.i(TAG, "ModMenuLoader.start called")
-        }
+    @JvmStatic
+    fun start(context: Context) {
+        // Library is loaded in init block; hook thread starts in JNI_OnLoad
+        Log.i(TAG, "ModMenuLoader.start called")
     }
 }

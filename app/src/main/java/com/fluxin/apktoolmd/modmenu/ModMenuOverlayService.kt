@@ -13,6 +13,7 @@ import android.widget.CompoundButton
 import android.widget.Switch
 import android.widget.TextView
 import androidx.core.content.ContextCompat
+import com.fluxin.apktoolmd.R
 
 /**
  * R3DNETWORK Mod Menu floating overlay service.
@@ -68,16 +69,16 @@ class ModMenuOverlayService : Service() {
         bubbleView?.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    initialX = windowManagerLayoutParams!!.x
-                    initialY = windowManagerLayoutParams!!.y
+                    initialX = windowManagerLayoutParams!!.x.toFloat()
+                    initialY = windowManagerLayoutParams!!.y.toFloat()
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
                     togglePanel()
                     false
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    windowManagerLayoutParams!!.x = initialX + (event.rawX - initialTouchX).toInt()
-                    windowManagerLayoutParams!!.y = initialY + (event.rawY - initialTouchY).toInt()
+                    windowManagerLayoutParams!!.x = (initialX + (event.rawX - initialTouchX)).toInt()
+                    windowManagerLayoutParams!!.y = (initialY + (event.rawY - initialTouchY)).toInt()
                     windowManager!!.updateViewLayout(bubbleView, windowManagerLayoutParams)
                     true
                 }
