@@ -1,6 +1,7 @@
 package com.fluxin.apktoolmd
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.Menu
@@ -9,6 +10,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import com.fluxin.apktoolmd.modmenu.ModMenuLoader
+import com.fluxin.apktoolmd.modmenu.ModMenuOverlayService
 import com.fluxin.apktoolmd.ui.DebugFragment
 import com.fluxin.apktoolmd.ui.HomeFragment
 import com.fluxin.apktoolmd.ui.SettingsFragment
@@ -24,13 +27,24 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        // Start R3DNETWORK mod menu (loads libmodmenu.so + installs hooks)
+        ModMenuLoader.start(this)
+
+        // Start floating mod menu overlay service
+        val intent = Intent(this, ModMenuOverlayService::class.java)
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.SYSTEM_ALERT_WINDOW)
+            == PackageManager.PERMISSION_GRANTED) {
+            startService(intent)
+        }
+
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
             != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(
                 this,
                 arrayOf(
                     Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                    Manifest.permission.READ_EXTERNAL_STORAGE
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.SYSTEM_ALERT_WINDOW
                 ),
                 storagePermCode
             )

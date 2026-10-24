@@ -111,4 +111,15 @@
     <string name="shadow_load_fail">Failed to load shadow loader: %1$s</string>
     <string name="shadow_instance_ok">Instantiated %1$s</string>
     <string name="shadow_instance_fail">Could not instantiate %1$s: %2$s</string>
+
+    <!-- R3DNETWORK Mod Menu -->
+    <string name="modmenu_title">R3DNETWORK Mod Menu</string>
+    <string name="modmenu_master">Master Switch</string>
+    <string name="modmenu_god_mode">God Mode</string>
+    <string name="modmenu_aim_assist">Aim Assist</string>
+    <string name="modmenu_esp">ESP (Enemy Boxes)</string>
+    <string name="modmenu_speed_hack">Speed Hack</string>
+    <string name="modmenu_no_spread">No Spread</string>
+    <string name="modmenu_auto_fire">Auto Fire</string>
+    <string name="modmenu_infinite_ammo">Infinite Ammo</string>
 </resources>

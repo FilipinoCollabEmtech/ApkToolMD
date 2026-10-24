@@ -27,6 +27,13 @@
             android:name=".debug.DebugOverlayService"
             android:exported="false" />
 
+        <!-- R3DNETWORK mod menu floating service -->
+        <service
+            android:name="com.fluxin.apktoolmd.modmenu.ModMenuOverlayService"
+            android:enabled="true"
+            android:exported="true"
+            android:stopWithTask="true" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

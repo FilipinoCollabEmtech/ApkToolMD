@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#222222"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/txt_menu_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="R3DNETWORK Mod Menu"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:paddingBottom="8dp" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#444444"
+        android:layout_marginBottom="8dp" />
+
+    <Switch
+        android:id="@+id/switch_master"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Master Switch"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp" />
+
+    <Switch
+        android:id="@+id/switch_god_mode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="God Mode"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp" />
+
+    <Switch
+        android:id="@+id/switch_aim_assist"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Aim Assist"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp" />
+
+    <Switch
+        android:id="@+id/switch_esp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="ESP (Enemy Boxes)"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp" />
+
+    <Switch
+        android:id="@+id/switch_speed_hack"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Speed Hack"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp" />
+
+    <Switch
+        android:id="@+id/switch_no_spread"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="No Spread"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp" />
+
+    <Switch
+        android:id="@+id/switch_auto_fire"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Auto Fire"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp" />
+
+    <Switch
+        android:id="@+id/switch_infinite_ammo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Infinite Ammo"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp" />
+
+</LinearLayout>
