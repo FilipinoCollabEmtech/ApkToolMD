@@ -1,0 +1,46 @@
+Step 1: Get a Better Binary (If Possible)
+
+The difficulty of this task depends entirely on whether your libcocos2dcpp.so has symbols.
+
+· With Symbols: If it's an older or unstripped build, you'll have function names. This makes finding "pickup" logic trivial. As the Geode SDK docs note, some Android builds of this library "has symbols!", meaning "every function name is present in the code".
+· Stripped: If symbols are removed, you'll be faced with thousands of generic sub_XXXX functions. This is harder, but the following steps are designed for this scenario.
+
+Step 2: Ghidra Headless Decompilation to Text
+
+This is your main engine. You'll run Ghidra from the terminal to decompile the entire binary into a single, searchable text file.
+
+1. Find the Script: The community script DecompileMatching.py is perfect for this. It decompiles functions matching a pattern to a text file.
+2. Run Headless: Use analyzeHeadless to execute the script. The example below decompiles every function in the binary into a file named libcocos2dcpp_decompiled.c:
+   ```bash
+   $GHIDRA_HOME/support/analyzeHeadless /tmp/ghidra_proj MyProject \
+     -import /path/to/libcocos2dcpp.so \
+     -processor ARM:LE:32:v7 \
+     -scriptPath /path/to/scripts/ \
+     -postScript DecompileMatching.py "" /tmp/libcocos2dcpp_decompiled.c \
+     -deleteProject
+   ```
+   Note: The empty string "" as the first argument tells the script to match all function names. Ensure you use the correct processor architecture (e.g., ARM:LE:32:v7 for 32-bit ARM).
+
+Step 3: Search the Decompiled Code for "Pickup" Logic
+
+Now that you have a text file of C pseudocode, you can use grep to hunt for clues. The logic might not be called "pickup" literally, so try several related terms.
+
+```bash
+# Search for strings related to picking up items
+grep -n -i -E "pickup|pick_up|collect|get_item|drop" /tmp/libcocos2dcpp_decompiled.c
+```
+
+This will list line numbers and the matching lines of code, immediately pointing you to functions that likely handle item interaction.
+
+Step 4: Trace Cross-References (XRefs)
+
+If the direct string search doesn't yield results, you need to find cross-references—where a specific string or constant is used in the code.
+
+1. Find a String: First, find a unique string related to your goal. For example, if a pickup creates a specific item, you might find its name in the .rodata section using strings.
+2. Find its XRef in Ghidra: You can then use a Ghidra script or the ghidra-cli tool to find all locations that reference that string's address. The tool ghidra-cli is designed for exactly this, allowing you to query for "cross-references" and "Find strings, bytes, functions" from the command line.
+
+This process of String → XRef → Function is a fundamental static analysis technique that lets you walk backward from a known data point to the code that uses it.
+
+💡 Alternative Terminal Tool: gdep
+
+For a higher-level, terminal-first approach, consider the gdep tool. It's a command-line tool specifically built for "Game Codebase Analysis" that supports Cocos2d-x (C++). It can perform "Flow Analysis" and "trace a gameplay flow" (like a pickup) directly from the terminal, potentially saving you from low-level Ghidra scripting.
