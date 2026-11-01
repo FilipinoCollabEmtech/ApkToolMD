@@ -3,6 +3,7 @@ package com.fluxin.apktoolmd.ui
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.database.Cursor
 import android.widget.EditText
 import android.net.Uri
@@ -33,7 +34,6 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
-import java.nio.channels.FileChannel
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
@@ -125,6 +125,7 @@ class HomeFragment : Fragment() {
         shadowStatus = view.findViewById(R.id.shadow_status)
 
         injectR3dButton = view.findViewById(R.id.inject_r3d_template)
+        val installButton = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.install_injected_apk)
 
         restoreShadowLoader()
 
@@ -136,6 +137,7 @@ class HomeFragment : Fragment() {
         shadowLoad.setOnClickListener { loadShadowLoader() }
         shadowTest.setOnClickListener { testShadowClass() }
         injectR3dButton.setOnClickListener { injectR3dTemplate() }
+        installButton.setOnClickListener { installInjectedApk() }
 
         applyProfileUi()
     }
@@ -899,7 +901,7 @@ class HomeFragment : Fragment() {
 
     // ------------------------------------------------------------ R3D template injection
 
-    /** Inject R3DNETWORK demo template files (from local assets) into the imported APK, add overlay permission, and auto-sign. */
+    /** Inject R3DNETWORK demo template files (from local assets) into the imported APK. */
     private fun injectR3dTemplate() {
         val root = view ?: return
         if (selectedUris.isEmpty()) {
@@ -926,8 +928,8 @@ class HomeFragment : Fragment() {
             val workDir = File("/sdcard/ApkToolMD/r3d_work").apply { deleteRecursively(); mkdirs() }
             val tempApk = File(workDir, "input.apk")
             val patchedApk = File(workDir, "patched.apk")
-            val signedApk = File("/sdcard/ApkToolMD/injected", "signed_${System.currentTimeMillis()}.apk")
-            signedApk.parentFile.mkdirs()
+            val injectedApk = File("/sdcard/ApkToolMD/injected", "patched_${System.currentTimeMillis()}.apk")
+            injectedApk.parentFile.mkdirs()
 
             var message: String
             try {
@@ -955,19 +957,11 @@ class HomeFragment : Fragment() {
                     }
                 }
 
-                // Inject SYSTEM_ALERT_WINDOW permission into AndroidManifest.xml
-                val manifestBytes = injectOverlayPermission(tempApk)
-                if (manifestBytes.isNotEmpty()) {
-                    addEntries["AndroidManifest.xml"] = manifestBytes
-                    log("injected SYSTEM_ALERT_WINDOW permission into AndroidManifest.xml")
-                    loaded++
-                }
-
                 if (loaded == 0) {
                     throw RuntimeException("no template files found in assets")
                 }
 
-                // Inject into APK using surgical zip patch (replace + add)
+                // Inject into APK using surgical zip patch (add-only)
                 log("injecting ${addEntries.size} entry(ies) into APK…")
                 val err = SurgicalZip.patch(
                     input = tempApk,
@@ -979,13 +973,12 @@ class HomeFragment : Fragment() {
                     throw RuntimeException("SurgicalZip failed: $err")
                 }
 
-                // Copy patched APK to output (auto-signing handled by CI; keystore embedded in assets)
-                patchedApk.copyTo(signedApk, overwrite = true)
+                // Copy patched APK to output
+                patchedApk.copyTo(injectedApk, overwrite = true)
 
-                message = getString(R.string.inject_r3d_done, signedApk.absolutePath)
+                message = getString(R.string.inject_r3d_done, injectedApk.absolutePath)
                 log(message)
                 log("entries injected: ${addEntries.keys.joinToString(", ")}")
-                log("NOTE: APK not auto-signed — CI builds are pre-signed; inject into CI-built APK or sign manually")
 
             } catch (e: Throwable) {
                 message = getString(R.string.inject_r3d_fail, e.message)
@@ -1003,25 +996,32 @@ class HomeFragment : Fragment() {
         }.start()
     }
 
-    /** Read AndroidManifest.xml from the APK, add SYSTEM_ALERT_WINDOW if missing, return the modified bytes. */
-    private fun injectOverlayPermission(apk: File): ByteArray {
-        ZipFile(apk).use { zf ->
-            val manifestEntry = zf.getEntry("AndroidManifest.xml") ?: return ByteArray(0)
-            val original = zf.getInputStream(manifestEntry).use { it.readBytes() }
-            val text = String(original, Charsets.UTF_8)
-            if (text.contains("SYSTEM_ALERT_WINDOW")) {
-                return ByteArray(0)
-            }
+    /** Install the injected APK via a file provider intent. */
+    private fun installInjectedApk() {
+        val root = view ?: return
+        val injectedDir = File("/sdcard/ApkToolMD/injected")
+        val files = injectedDir.listFiles()?.filter { it.extension.equals("apk", ignoreCase = true) }?.sortedByDescending { it.lastModified() }
+        val latest = files?.firstOrNull() ?: run {
+            showSnack(root, "No injected APK found. Inject one first.")
+            return
+        }
 
-            // Insert permission before </manifest> or after <manifest ...>
-            val permissionLine = "\n    <uses-permission android:name=\"android.permission.SYSTEM_ALERT_WINDOW\" />"
-            val modified = if (text.contains("</manifest>")) {
-                text.replace("</manifest>", permissionLine + "\n</manifest>")
-            } else {
-                text + permissionLine
-            }
+        val appContext = requireContext().applicationContext
+        val apkUri = androidx.core.content.FileProvider.getUriForFile(
+            appContext,
+            "${appContext.packageName}.fileprovider",
+            latest
+        )
 
-            return modified.toByteArray(Charsets.UTF_8)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(apkUri, "application/vnd.android.package-archive")
+            flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+
+        if (intent.resolveActivity(appContext.packageManager) != null) {
+            startActivity(intent)
+        } else {
+            showSnack(root, "No app installed to install APKs.")
         }
     }
 

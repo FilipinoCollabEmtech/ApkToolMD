@@ -132,4 +132,5 @@
     <string name="inject_r3d_done">R3D template injected → %1$s</string>
     <string name="inject_r3d_fail">Injection failed: %1$s</string>
     <string name="inject_r3d_no_apk">Import an APK first</string>
+    <string name="install_injected_apk">Install Injected APK</string>
 </resources>

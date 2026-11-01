@@ -230,6 +230,14 @@
             android:layout_marginTop="8dp"
             android:text="@string/inject_r3d_template" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/install_injected_apk"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/install_injected_apk" />
+
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/import_details_card"
             android:layout_width="match_parent"
