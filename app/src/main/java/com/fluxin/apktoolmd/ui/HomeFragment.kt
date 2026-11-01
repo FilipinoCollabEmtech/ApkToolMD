@@ -23,6 +23,7 @@ import androidx.core.widget.NestedScrollView
 import com.fluxin.apktoolmd.R
 import com.fluxin.apktoolmd.mod.RemapRule
 import com.fluxin.apktoolmd.mod.ShadowLoader
+import com.fluxin.apktoolmd.util.ApkSigner
 import com.fluxin.apktoolmd.util.SurgicalZip
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -974,13 +975,38 @@ class HomeFragment : Fragment() {
                     throw RuntimeException("SurgicalZip failed: $err")
                 }
 
-                // Copy patched APK to output — sign manually on PC with apksigner (v1+v2 required)
+                // Auto-sign with V1 scheme using embedded keystore
+                log("signing patched APK (v1 scheme)…")
+                val keystoreFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/release.p12")
+                val aliasFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/alias")
+                val storePassFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/storepass")
+                val keyPassFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/keypass")
+
+                if (!keystoreFile.exists()) {
+                    throw RuntimeException("embedded keystore not found — inject into CI-built APK or sign manually on PC")
+                }
+
+                val signErr = ApkSigner.signV1(
+                    patchedApk,
+                    keystoreFile,
+                    storePassFile.readText().trim(),
+                    aliasFile.readText().trim(),
+                    keyPassFile.readText().trim()
+                )
+                if (signErr != null) {
+                    throw RuntimeException(signErr)
+                }
+
+                // Copy signed APK to output
                 patchedApk.copyTo(injectedApk, overwrite = true)
 
                 message = getString(R.string.inject_r3d_done, injectedApk.absolutePath)
                 log(message)
                 log("entries injected: ${addEntries.keys.joinToString(", ")}")
-                log(getString(R.string.inject_sign_note, injectedApk.absolutePath))
+                log("signed with V1 scheme")
+                log("MANIFEST: add to target app AndroidManifest.xml before installing:")
+                log("  <uses-permission android:name=\"android.permission.SYSTEM_ALERT_WINDOW\" />")
+                log("  <service android:name=\"com.fluxin.apktoolmd.modmenu.ModMenuOverlayService\" android:exported=\"true\" />")
 
             } catch (e: Throwable) {
                 message = getString(R.string.inject_r3d_fail, e.message)
