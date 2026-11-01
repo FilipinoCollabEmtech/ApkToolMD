@@ -34,6 +34,8 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.util.zip.ZipEntry
+import com.android.apksig.ApkSigner
+import com.android.apksig.internal.util.SigningDetails
 import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 import java.util.zip.CRC32
@@ -898,7 +900,7 @@ class HomeFragment : Fragment() {
 
     // ------------------------------------------------------------ R3D template injection
 
-    /** Inject R3DNETWORK demo template files (from local assets) into the imported APK. */
+    /** Inject R3DNETWORK demo template files (from local assets) into the imported APK, add overlay permission, and auto-sign. */
     private fun injectR3dTemplate() {
         val root = view ?: return
         if (selectedUris.isEmpty()) {
@@ -924,8 +926,9 @@ class HomeFragment : Fragment() {
         Thread {
             val workDir = File("/sdcard/ApkToolMD/r3d_work").apply { deleteRecursively(); mkdirs() }
             val tempApk = File(workDir, "input.apk")
-            val outApk = File("/sdcard/ApkToolMD/injected", "patched_${System.currentTimeMillis()}.apk")
-            outApk.parentFile.mkdirs()
+            val patchedApk = File(workDir, "patched.apk")
+            val signedApk = File("/sdcard/ApkToolMD/injected", "signed_${System.currentTimeMillis()}.apk")
+            signedApk.parentFile.mkdirs()
 
             var message: String
             try {
@@ -953,31 +956,72 @@ class HomeFragment : Fragment() {
                     }
                 }
 
+                // Inject SYSTEM_ALERT_WINDOW permission into AndroidManifest.xml
+                val manifestBytes = injectOverlayPermission(tempApk)
+                if (manifestBytes.isNotEmpty()) {
+                    addEntries["AndroidManifest.xml"] = manifestBytes
+                    log("injected SYSTEM_ALERT_WINDOW permission into AndroidManifest.xml")
+                    loaded++
+                }
+
                 if (loaded == 0) {
                     throw RuntimeException("no template files found in assets")
                 }
 
-                // Inject into APK using surgical zip patch (add-only)
+                // Inject into APK using surgical zip patch (replace + add)
                 log("injecting ${addEntries.size} entry(ies) into APK…")
                 val err = SurgicalZip.patch(
                     input = tempApk,
-                    output = outApk,
-                    replace = emptyMap(),
-                    add = addEntries
+                    output = patchedApk,
+                    replace = addEntries,
+                    add = emptyMap()
                 )
                 if (err != null) {
                     throw RuntimeException("SurgicalZip failed: $err")
                 }
 
-                message = getString(R.string.inject_r3d_done, outApk.absolutePath)
+                // Auto-sign the patched APK using the embedded keystore
+                log("signing patched APK…")
+                val keystoreFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/release.p12")
+                val aliasFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/alias")
+                val storePassFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/storepass")
+                val keyPassFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/keypass")
+
+                if (!keystoreFile.exists()) {
+                    throw RuntimeException("embedded keystore not found (build didn't include signing keys)")
+                }
+
+                val alias = aliasFile.readText().trim()
+                val storePass = storePassFile.readText().trim()
+                val keyPass = keyPassFile.readText().trim()
+
+                val signer = ApkSigner.Builder().setSigner(SigningDetails.newV1SchemeSigner(
+                        keystoreFile.inputStream().use { it.readBytes() },
+                        storePass.toByteArray(Charsets.UTF_8),
+                        alias,
+                        keyPass.toByteArray(Charsets.UTF_8)))
+                        .build()
+
+                val in = FileInputStream(patchedApk).channel
+                val out = FileOutputStream(signedApk).channel
+                try {
+                    signer.sign(in, out)
+                } finally {
+                    in.close()
+                    out.close()
+                }
+
+                message = getString(R.string.inject_r3d_done, signedApk.absolutePath)
                 log(message)
-                log("entries added: ${addEntries.keys.joinToString(", ")}")
+                log("entries injected: ${addEntries.keys.joinToString(", ")}")
+                log("signed with alias: $alias")
 
             } catch (e: Throwable) {
                 message = getString(R.string.inject_r3d_fail, e.message)
                 log("ERROR: $message")
             } finally {
                 tempApk.delete()
+                patchedApk.delete()
             }
 
             root.post {
@@ -986,6 +1030,28 @@ class HomeFragment : Fragment() {
                 showSnack(root, message)
             }
         }.start()
+    }
+
+    /** Read AndroidManifest.xml from the APK, add SYSTEM_ALERT_WINDOW if missing, return the modified bytes. */
+    private fun injectOverlayPermission(apk: File): ByteArray {
+        ZipFile(apk).use { zf ->
+            val manifestEntry = zf.getEntry("AndroidManifest.xml") ?: return ByteArray(0)
+            val original = zf.getInputStream(manifestEntry).use { it.readBytes() }
+            val text = String(original, Charsets.UTF_8)
+            if (text.contains("SYSTEM_ALERT_WINDOW")) {
+                return ByteArray(0)
+            }
+
+            // Insert permission before </manifest> or after <manifest ...>
+            val permissionLine = "\n    <uses-permission android:name=\"android.permission.SYSTEM_ALERT_WINDOW\" />"
+            val modified = if (text.contains("</manifest>")) {
+                text.replace("</manifest>", permissionLine + "\n</manifest>")
+            } else {
+                text + permissionLine
+            }
+
+            return modified.toByteArray(Charsets.UTF_8)
+        }
     }
 
     private fun log(line: String) {
