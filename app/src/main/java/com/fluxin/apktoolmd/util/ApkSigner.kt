@@ -120,15 +120,15 @@ object ApkSigner {
         algoContent.write(0x06)
         val oid = byteArrayOf(0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B)
         algoContent.write(0x09)
-        algoContent.write(oid.size.toByte())
+        algoContent.write(oid.size.toInt().toByte())
         algoContent.write(oid)
         algoContent.write(0x05)
         algoContent.write(0x00)
-        content.write(algoContent.size.toByte())
+        content.write(algoContent.size.toInt().toByte())
         content.write(algoContent.toByteArray())
 
         content.write(0x04)
-        content.write(signature.size.toByte())
+        content.write(signature.size.toInt().toByte())
         content.write(signature)
 
         content.write(0x31)
@@ -138,19 +138,19 @@ object ApkSigner {
         certInner.write(0x02)
         certInner.write(0x01)
         certInner.write(0x03)
-        certContent.write(certInner.size.toByte())
+        certContent.write(certInner.size.toInt().toByte())
         certContent.write(certInner.toByteArray())
-        content.write(certContent.size.toByte())
+        content.write(certContent.size.toInt().toByte())
         content.write(certContent.toByteArray())
 
         val result = ByteArrayOutputStream()
         result.write(0x30)
         val contentBytes = content.toByteArray()
         if (contentBytes.size < 128) {
-            result.write(contentBytes.size.toByte())
+            result.write(contentBytes.size.toInt().toByte())
         } else {
             result.write(0x81)
-            result.write(contentBytes.size.toByte())
+            result.write(contentBytes.size.toInt().toByte())
         }
         result.write(contentBytes)
 
@@ -187,6 +187,6 @@ object ApkSigner {
                 }
             }
         }
-        tempFile.moveTo(apkFile)
+        tempFile.renameTo(apkFile)
     }
 }
