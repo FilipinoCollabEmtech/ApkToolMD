@@ -54,12 +54,12 @@ object ApkSigner {
 
                 val entrySig = Signature.getInstance(SIG_ALGORITHM)
                 entrySig.initSign(privateKey)
-                zf.getInputStream(entry).use { is ->
+                zf.getInputStream(entry).use { input ->
                     val buffer = ByteArray(8192)
-                    var read: Int = is.read(buffer)
+                    var read: Int = input.read(buffer)
                     while (read > 0) {
                         entrySig.update(buffer, 0, read)
-                        read = is.read(buffer)
+                        read = input.read(buffer)
                     }
                 }
                 entryDigests[name] = entrySig.sign()
@@ -108,10 +108,10 @@ object ApkSigner {
 
     private fun buildCertRSA(signature: ByteArray, cert: X509Certificate): ByteArray {
         val baos = ByteArrayOutputStream()
-        baos.write(signature.size.toInt())
+        baos.write(signature.size)
         baos.write(signature)
         val certBytes = cert.encoded
-        baos.write(certBytes.size.toInt())
+        baos.write(certBytes.size)
         baos.write(certBytes)
         return baos.toByteArray()
     }
@@ -130,8 +130,8 @@ object ApkSigner {
                     existingNames.add(entry.name)
                     zos.putNextEntry(entry)
                     if (!entry.isDirectory && entry.name !in entries) {
-                        zf.getInputStream(entry).use { is ->
-                            is.copyTo(zos)
+                        zf.getInputStream(entry).use { input ->
+                            input.copyTo(zos)
                         }
                     }
                     zos.closeEntry()
