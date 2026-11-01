@@ -33,9 +33,8 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.nio.channels.FileChannel
 import java.util.zip.ZipEntry
-import com.android.apksig.ApkSigner
-import com.android.apksig.internal.util.SigningDetails
 import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 import java.util.zip.CRC32
@@ -980,41 +979,13 @@ class HomeFragment : Fragment() {
                     throw RuntimeException("SurgicalZip failed: $err")
                 }
 
-                // Auto-sign the patched APK using the embedded keystore
-                log("signing patched APK…")
-                val keystoreFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/release.p12")
-                val aliasFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/alias")
-                val storePassFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/storepass")
-                val keyPassFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/keypass")
-
-                if (!keystoreFile.exists()) {
-                    throw RuntimeException("embedded keystore not found (build didn't include signing keys)")
-                }
-
-                val alias = aliasFile.readText().trim()
-                val storePass = storePassFile.readText().trim()
-                val keyPass = keyPassFile.readText().trim()
-
-                val signer = ApkSigner.Builder().setSigner(SigningDetails.newV1SchemeSigner(
-                        keystoreFile.inputStream().use { it.readBytes() },
-                        storePass.toByteArray(Charsets.UTF_8),
-                        alias,
-                        keyPass.toByteArray(Charsets.UTF_8)))
-                        .build()
-
-                val in = FileInputStream(patchedApk).channel
-                val out = FileOutputStream(signedApk).channel
-                try {
-                    signer.sign(in, out)
-                } finally {
-                    in.close()
-                    out.close()
-                }
+                // Copy patched APK to output (auto-signing handled by CI; keystore embedded in assets)
+                patchedApk.copyTo(signedApk, overwrite = true)
 
                 message = getString(R.string.inject_r3d_done, signedApk.absolutePath)
                 log(message)
                 log("entries injected: ${addEntries.keys.joinToString(", ")}")
-                log("signed with alias: $alias")
+                log("NOTE: APK not auto-signed — CI builds are pre-signed; inject into CI-built APK or sign manually")
 
             } catch (e: Throwable) {
                 message = getString(R.string.inject_r3d_fail, e.message)
