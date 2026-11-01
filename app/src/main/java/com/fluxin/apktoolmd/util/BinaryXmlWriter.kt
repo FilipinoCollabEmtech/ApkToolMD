@@ -15,15 +15,6 @@ import java.util.Map
  * Parses AndroidManifest.xml binary XML and injects:
  *   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
  *   <service android:name="com.fluxin.apktoolmd.modmenu.ModMenuOverlayService" android:exported="true" />
- *
- * Binary XML format (AOSP frameworks/base/libs/utils/ResXMLParser.cpp):
- *   Chunks: type(2) + headerSize(2) + size(4) + contents(headerSize-8 .. size-8)
- *   String pool: magic + chunkSize + stringCount + styleCount + flags + stringsOffset + stylesOffset +
- *                stringIndex[] + stringData[]
- *   Start element: type(0x0102) + chunkSize + lineNumber + startNs + name + flags +
- *                  attrCount + attrClassId + attrStyleId + attributes[n*20]
- *   Each attribute: ns(4) + name(4) + rawValue(4) + type(4) + data(4)
- *   End element: type(0x0103) + 16 + lineNumber + endNs + name
  */
 object BinaryXmlWriter {
 
@@ -35,7 +26,6 @@ object BinaryXmlWriter {
 
     private const val FLAG_UTF8 = 0x00000008
 
-    // Attribute value types
     private const val ATTR_TYPE_STRING = 3
     private const val ATTR_TYPE_INT_DEC = 0x10
     private const val ATTR_TYPE_INT_HEX = 0x11
@@ -43,20 +33,16 @@ object BinaryXmlWriter {
 
     private const val NO_NAMESPACE = 0xFFFFFFFFL
 
-    private const val START_ELEMENT_HEADER_SIZE = 16 // type+size+line+startNs+name+flags+attrCount+attrClass
+    private const val START_ELEMENT_HEADER_SIZE = 16
     private const val END_ELEMENT_SIZE = 16
 
-    /**
-     * Patch AndroidManifest.xml binary XML to inject uses-permission + service elements
-     * before </manifest>.
-     */
-    fun patchManifest(xmlBytes: ByteArray): ByteArray? {
-        if (xmlBytes.size < 64) return null
+    fun patchManifest(xml: ByteArray): ByteArray? {
+        if (xml.size < 64) return null
 
-        try {
-            return patchManifestInternal(xmlBytes)
+        return try {
+            patchManifestInternal(xml)
         } catch (e: Exception) {
-            return null
+            null
         }
     }
 
@@ -64,16 +50,12 @@ object BinaryXmlWriter {
         val buf = ByteBuffer.wrap(xml)
         buf.order(ByteOrder.LITTLE_ENDIAN)
 
-        // Find the XML chunk (skip ZIP local header if present)
         val xmlChunkStart = findXmlChunkStart(buf, xml) ?: return null
-        val xmlChunkSize = buf.getInt(xmlChunkStart + 4) & 0xFFFFFFFFL
-        val xmlContentStart = xmlChunkStart + 8
+        val xmlChunkSize = buf.getInt(xmlChunkStart + 4).toInt() and 0xFFFF
 
-        // Parse string pool from within XML chunk
-        val stringPoolStart = findStringPoolStart(xml, xmlContentStart, xmlChunkSize.toInt()) ?: return null
+        val stringPoolStart = findStringPoolStart(xml, xmlChunkStart + 8, xmlChunkSize - 8) ?: return null
         val stringPool = parseStringPool(xml, stringPoolStart)
 
-        // Strings we need to add
         val stringsToAdd = mutableListOf<String>()
         fun ensureString(s: String) {
             if (!stringPool.containsKey(s)) stringsToAdd.add(s)
@@ -86,85 +68,74 @@ object BinaryXmlWriter {
         ensureString("true")
         ensureString("com.fluxin.apktoolmd.modmenu.ModMenuOverlayService")
 
-        // Find </manifest> end element position
         val manifestEndPos = findManifestEnd(xml, stringPool) ?: return null
 
-        // Build new element chunks
         val newElements = buildNewElements(stringPool, stringsToAdd)
 
-        // Rebuild string pool with new strings
         val newStringPool = rebuildStringPool(xml, stringPoolStart, stringsToAdd)
 
-        // Assemble: [stringPool][newElements][rest of XML after manifest end]
         val result = ByteArrayOutputStream()
 
-        // Copy string pool (with new strings)
         result.write(newStringPool)
 
-        // Copy everything between string pool end and manifest end (unchanged)
         val stringPoolEnd = stringPoolStart + newStringPool.size
         val middleSize = manifestEndPos - stringPoolEnd
         if (middleSize > 0) result.write(xml, stringPoolEnd, middleSize)
 
-        // Insert new elements before </manifest>
         result.write(newElements)
 
-        // Copy rest after manifest end
         val restSize = xml.size - manifestEndPos
         if (restSize > 0) result.write(xml, manifestEndPos, restSize)
 
         return result.toByteArray()
     }
 
-    /** Find the start of the RES_XML chunk within the file. */
     private fun findXmlChunkStart(buf: ByteBuffer, xml: ByteArray): Int? {
         var pos = 0
         while (pos + 8 <= buf.capacity()) {
-            val type = buf.getInt(pos) & 0xFFFFFFFFL
+            val type = buf.getInt(pos) and 0xFFFFFFFFL
             val headerSize = buf.getShort(pos + 2).toInt() and 0xFFFF
-            val chunkSize = buf.getInt(pos + 4) & 0xFFFFFFFFL
+            val chunkSize = buf.getInt(pos + 4).toInt() and 0xFFFF
             if (chunkSize < 8 || pos + chunkSize > buf.capacity()) break
             if (type == CHUNK_TYPE_RES_XML) return pos
-            pos += chunkSize.toInt()
+            pos += chunkSize
         }
         return null
     }
 
-    /** Find the string pool chunk start within XML content. */
     private fun findStringPoolStart(xml: ByteArray, xmlStart: Int, xmlSize: Int): Int? {
         val buf = ByteBuffer.wrap(xml)
         buf.order(ByteOrder.LITTLE_ENDIAN)
         var pos = xmlStart
         while (pos + 8 <= buf.capacity()) {
-            val type = buf.getInt(pos) & 0xFFFFFFFFL
-            val chunkSize = buf.getInt(pos + 4) & 0xFFFFFFFFL
+            val type = buf.getInt(pos) and 0xFFFFFFFFL
+            val chunkSize = buf.getInt(pos + 4).toInt() and 0xFFFF
             if (chunkSize < 8 || pos + chunkSize > buf.capacity()) break
             if (type == CHUNK_TYPE_STRING_POOL) return pos
-            pos += chunkSize.toInt()
+            pos += chunkSize
         }
         return null
     }
 
-    /** Parse string pool: map string -> index. */
     private fun parseStringPool(xml: ByteArray, spStart: Int): Map<String, Int> {
         val result = LinkedHashMap<String, Int>()
         val buf = ByteBuffer.wrap(xml)
         buf.order(ByteOrder.LITTLE_ENDIAN)
-        buf.position(spStart + 8) // skip chunk header
+        buf.position(spStart + 8)
 
-        val spHeaderSize = buf.getInt() & 0xFFFFFFFFL
-        val stringCount = buf.getInt() & 0xFFFFFFFFL
-        val styleCount = buf.getInt() & 0xFFFFFFFFL
-        val flags = buf.getInt() & 0xFFFFFFFFL
-        val stringsOffset = buf.getInt() & 0xFFFFFFFFL
+        val spHeaderSize = buf.getInt().toInt() and 0xFFFF
+        val stringCount = buf.getInt().toInt() and 0xFFFF
+        buf.getInt() // styleCount
+        val flags = buf.getInt() and 0xFFFFFFFFL
+        buf.getInt() // stringsOffset
 
         val isUtf8 = (flags and FLAG_UTF8) != 0
         val stringDataStart = spHeaderSize.toInt()
-        val stringIdxStart = stringDataStart + stringCount.toInt() * 4
+        val stringIdxStart = stringDataStart + stringCount * 4
 
-        for (i in 0 until stringCount.toInt()) {
-            val strOffset = buf.getInt(stringIdxStart + i * 4) & 0xFFFFFFFFL
-            val str = readStringFromPool(xml, stringDataStart.toInt() + strOffset.toInt(), isUtf8)
+        for (i in 0 until stringCount) {
+            val strOffset = buf.getInt(stringIdxStart + i * 4) and 0xFFFFFFFFL
+            val str = readStringFromPool(xml, stringDataStart + strOffset.toInt(), isUtf8)
             if (str != null) result[str] = i
         }
         return result
@@ -180,29 +151,28 @@ object BinaryXmlWriter {
         return String(bytes, StandardCharsets.UTF_8)
     }
 
-    /** Find position of </manifest> end element within XML content. */
     private fun findManifestEnd(xml: ByteArray, stringPool: Map<String, Int>): Int? {
         val buf = ByteBuffer.wrap(xml)
         buf.order(ByteOrder.LITTLE_ENDIAN)
         var pos = 0
         while (pos + 8 <= buf.capacity()) {
-            val type = buf.getInt(pos) & 0xFFFFFFFFL
+            val type = buf.getInt(pos) and 0xFFFFFFFFL
             val headerSize = buf.getShort(pos + 2).toInt() and 0xFFFF
-            val chunkSize = buf.getInt(pos + 4) & 0xFFFFFFFFL
+            val chunkSize = buf.getInt(pos + 4).toInt() and 0xFFFF
             if (chunkSize < 8 || pos + chunkSize > buf.capacity()) break
 
             if (type == CHUNK_END_ELEMENT) {
                 val contentsPos = pos + 8
                 if (contentsPos + 8 <= buf.capacity()) {
                     buf.position(contentsPos)
-                    buf.getInt() // skip lineNumber
-                    buf.getInt() // skip endNs
-                    val nameId = buf.getInt() & 0xFFFFFFFFL
+                    buf.getInt() // lineNumber
+                    buf.getInt() // endNs
+                    val nameId = buf.getInt() and 0xFFFFFFFFL
                     val name = getStringFromPoolByIndex(xml, nameId.toInt())
                     if (name == "manifest") return pos
                 }
             }
-            pos += chunkSize.toInt()
+            pos += chunkSize
         }
         return null
     }
@@ -212,15 +182,15 @@ object BinaryXmlWriter {
         buf.order(ByteOrder.LITTLE_ENDIAN)
         var pos = 0
         while (pos + 8 <= buf.capacity()) {
-            val type = buf.getInt(pos) & 0xFFFFFFFFL
-            val chunkSize = buf.getInt(pos + 4) & 0xFFFFFFFFL
+            val type = buf.getInt(pos) and 0xFFFFFFFFL
+            val chunkSize = buf.getInt(pos + 4).toInt() and 0xFFFF
             if (chunkSize < 8 || pos + chunkSize > buf.capacity()) break
             if (type == CHUNK_TYPE_STRING_POOL) {
                 buf.position(pos + 8)
                 buf.getInt() // spHeaderSize
-                val stringCount = buf.getInt() & 0xFFFFFFFFL
-                val styleCount = buf.getInt() & 0xFFFFFFFFL
-                val flags = buf.getInt() & 0xFFFFFFFFL
+                val stringCount = buf.getInt() and 0xFFFFFFFFL
+                buf.getInt() // styleCount
+                buf.getInt() // flags
                 val stringsOffset = buf.getInt() & 0xFFFFFFFFL
                 val isUtf8 = (flags and FLAG_UTF8) != 0
                 val stringDataStart = buf.position()
@@ -228,29 +198,30 @@ object BinaryXmlWriter {
 
                 if (index >= 0 && index < stringCount) {
                     buf.position(stringIdxStart + index * 4)
-                    val strOffset = buf.getInt() & 0xFFFFFFFFL
+                    val strOffset = buf.getInt() and 0xFFFFFFFFL
                     return readStringFromPool(xml, stringDataStart.toInt() + strOffset.toInt(), isUtf8)
                 }
                 return null
             }
-            pos += chunkSize.toInt()
+            pos += chunkSize
         }
         return null
     }
 
-    /** Build new element chunks for uses-permission and service. */
     private fun buildNewElements(stringPool: Map<String, Int>, stringsToAdd: List<String>): ByteArray {
         val baos = ByteArrayOutputStream()
 
-        fun idx(s: String): Int = stringPool[s] ?: stringsToAdd.indexOf(s) + stringPool.size
+        fun idx(s: String): Int {
+            val existing = stringPool[s]
+            if (existing != null) return existing
+            return stringPool.size + stringsToAdd.indexOf(s)
+        }
 
-        // <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
         buildStartElement(baos, idx("uses-permission"), listOf(
             Pair(idx("android:name"), Pair(ATTR_TYPE_STRING, idx("android.permission.SYSTEM_ALERT_WINDOW")))
         ))
         buildEndElement(baos, idx("uses-permission"))
 
-        // <service android:name="com.fluxin.apktoolmd.modmenu.ModMenuOverlayService" android:exported="true" />
         buildStartElement(baos, idx("service"), listOf(
             Pair(idx("android:name"), Pair(ATTR_TYPE_STRING, idx("com.fluxin.apktoolmd.modmenu.ModMenuOverlayService"))),
             Pair(idx("android:exported"), Pair(ATTR_TYPE_STRING, idx("true")))
@@ -276,45 +247,47 @@ object BinaryXmlWriter {
         baos.write(intToBytesLE(0xFFFFFFFF)) // classAttribute
         baos.write(intToBytesLE(0xFFFFFFFF)) // styleAttribute
 
-        for ((attrNameIdx, (attrType, attrValueIdx)) in attributes) {
-            baos.write(intToBytesLE(NO_NAMESPACE.toInt())) // ns
-            baos.write(intToBytesLE(attrNameIdx)) // name
-            baos.write(intToBytesLE(attrValueIdx)) // rawValue (string ref)
-            baos.write(intToBytesLE(attrType)) // type
-            baos.write(intToBytesLE(attrValueIdx)) // data
+        for (pair in attributes) {
+            val attrNameIdx = pair.first
+            val attrValuePair = pair.second
+            val attrValueIdx = attrValuePair.second
+            val attrType = attrValuePair.first
+
+            baos.write(intToBytesLE(NO_NAMESPACE.toInt()))
+            baos.write(intToBytesLE(attrNameIdx))
+            baos.write(intToBytesLE(attrValueIdx))
+            baos.write(intToBytesLE(attrType))
+            baos.write(intToBytesLE(attrValueIdx))
         }
     }
 
     private fun buildEndElement(baos: ByteArrayOutputStream, nameIdx: Int) {
         baos.write(intToBytesLE(CHUNK_END_ELEMENT))
-        baos.write(intToBytesLE(END_ELEMENT_SIZE)) // chunkSize
+        baos.write(intToBytesLE(END_ELEMENT_SIZE))
         baos.write(intToBytesLE(0)) // lineNumber
         baos.write(intToBytesLE(NO_NAMESPACE.toInt())) // endNs
         baos.write(intToBytesLE(nameIdx)) // name
     }
 
-    /** Rebuild string pool with new strings appended. */
     private fun rebuildStringPool(xml: ByteArray, spStart: Int, newStrings: List<String>): ByteArray {
         val buf = ByteBuffer.wrap(xml)
         buf.order(ByteOrder.LITTLE_ENDIAN)
         buf.position(spStart + 8)
 
-        val spHeaderSize = buf.getInt() & 0xFFFFFFFFL
-        val oldStringCount = buf.getInt() & 0xFFFFFFFFL
-        val styleCount = buf.getInt() & 0xFFFFFFFFL
-        val flags = buf.getInt() & 0xFFFFFFFFL
+        val spHeaderSize = buf.getInt().toInt() and 0xFFFF
+        val oldStringCount = buf.getInt().toInt() and 0xFFFF
+        val styleCount = buf.getInt().toInt() and 0xFFFF
+        val flags = buf.getInt() and 0xFFFFFFFFL
         val oldStringsOffset = buf.getInt() & 0xFFFFFFFFL
-        val stylesOffset = buf.getInt() & 0xFFFFFFFFL
 
-        val newStringCount = oldStringCount.toInt() + newStrings.size
-        val newStringsOffset = spHeaderSize.toInt() + oldStringCount.toInt() * 4
+        val newStringCount = oldStringCount + newStrings.size
+        val newStringsOffset = spHeaderSize.toInt() + oldStringCount * 4
 
         val out = ByteArrayOutputStream()
 
-        // String pool header
         out.write(intToBytesLE(CHUNK_TYPE_STRING_POOL))
-        val stringDataSize = newStrings.fold(0) { acc, s -> acc + s.toByteArray(StandardCharsets.UTF_8).size + 2 } // 2 = length prefix
-        val newStylesDataSize = if (styleCount > 0) styleCount.toInt() * 4 else 0
+        val stringDataSize = newStrings.fold(0) { acc, s -> acc + s.toByteArray(StandardCharsets.UTF_8).size + 2 }
+        val newStylesDataSize = if (styleCount > 0) styleCount * 4 else 0
         val newChunkSize = spHeaderSize.toInt() + newStringCount * 4 + newStringDataSize + newStylesDataSize
         out.write(intToBytesLE(newChunkSize))
         out.write(intToBytesLE(newStringCount))
@@ -323,20 +296,17 @@ object BinaryXmlWriter {
         out.write(intToBytesLE(newStringsOffset))
         out.write(intToBytesLE(stylesOffset))
 
-        // Copy old string index table
         buf.position(spStart + 8 + spHeaderSize.toInt())
-        val oldIndexData = ByteArray(oldStringCount.toInt() * 4)
+        val oldIndexData = ByteArray(oldStringCount * 4)
         buf.get(oldIndexData)
         out.write(oldIndexData)
 
-        // Write new string index offsets
-        var currentOffset = newStringsOffset.toInt() + newStringDataSize
+        var currentOffset = newStringsOffset + newStringDataSize
         for (s in newStrings) {
             out.write(intToBytesLE(currentOffset))
             currentOffset += s.toByteArray(StandardCharsets.UTF_8).size + 2
         }
 
-        // Copy old string data
         buf.position(spStart + 8 + oldStringsOffset.toInt())
         val oldDataSize = (stylesOffset - oldStringsOffset).toInt()
         if (oldDataSize > 0) {
@@ -345,13 +315,12 @@ object BinaryXmlWriter {
             out.write(oldData)
         }
 
-        // Write new string data (length-prefixed UTF-8)
         for (s in newStrings) {
             val bytes = s.toByteArray(StandardCharsets.UTF_8)
-            out.write(bytes.length.toByte())
-            out.write((bytes.length shr 8).toByte())
+            out.write(bytes.size)
+            out.write((bytes.size shr 8).toInt().toByte())
             out.write(bytes)
-            out.write(0) // null terminator
+            out.write(0)
         }
 
         return out.toByteArray()
