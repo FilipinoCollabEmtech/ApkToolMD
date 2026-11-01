@@ -13,29 +13,10 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
-/**
- * APK Signature Scheme v1 (JAR signing) signer.
- *
- * Uses only java.security APIs — no external dependencies.
- * Signs each ZIP entry individually and writes META-INF/*.RSA/.SF files.
- * Works on Android 5.0+. Android 7.0+ prefers v2 but still accepts v1-signed APKs.
- *
- * Reference: https://source.android.com/docs/core/app-signing/apk-scheme-v1
- */
 object ApkSigner {
 
     private const val SIG_ALGORITHM = "SHA256withRSA"
 
-    /**
-     * Sign an APK with v1 scheme using an embedded PKCS12 keystore.
-     *
-     * @param apkFile the APK to sign (modified in place)
-     * @param keystoreFile PKCS12 keystore
-     * @param keystorePassword keystore password
-     * @param keyAlias key alias
-     * @param keyPassword key password
-     * @return null on success, error message on failure
-     */
     fun signV1(
         apkFile: File,
         keystoreFile: File,
@@ -62,10 +43,6 @@ object ApkSigner {
         privateKey: PrivateKey,
         chain: List<X509Certificate>
     ) {
-        val sig = Signature.getInstance(SIG_ALGORITHM)
-        sig.initSign(privateKey)
-
-        // First pass: compute SHA-256 digests of all non-META-INF entries
         val entryDigests = mutableMapOf<String, ByteArray>()
         ZipFile(apkFile).use { zf ->
             val entries = zf.entries()
@@ -89,7 +66,6 @@ object ApkSigner {
             }
         }
 
-        // Build manifest entries
         val manifestLines = mutableListOf<String>()
         manifestLines.add("Manifest-Version: 1.0")
         manifestLines.add("Created-By: ApkToolMD v1-signer")
@@ -112,19 +88,17 @@ object ApkSigner {
             sfLines.add("")
         }
 
-        // Sign the entire SF content for the RSA block
+        val sf = Signature.getInstance(SIG_ALGORITHM)
+        sf.initSign(privateKey)
         val sfContent = sfLines.joinToString("\n")
-        sig.update(sfContent.toByteArray(Charsets.UTF_8))
-        val rsaSignature = sig.sign()
+        sf.update(sfContent.toByteArray(Charsets.UTF_8))
+        val rsaSignature = sf.sign()
 
-        // Build CERT.SF (signature file) - same as SF but with signature block header
         val certSFContent = sfLines.joinToString("\n")
         val certSFBytes = certSFContent.toByteArray(Charsets.UTF_8)
 
-        // Build CERT.RSA - PKCS#7 signature block (simplified)
         val certRSA = buildCertRSA(rsaSignature, chain.first())
 
-        // Rewrite ZIP with META-INF entries added
         rewriteZipWithEntries(apkFile, mapOf(
             "META-INF/MANIFEST.MF" to manifestLines.joinToString("\n").toByteArray(Charsets.UTF_8),
             "META-INF/CERT.SF" to certSFBytes,
@@ -132,28 +106,19 @@ object ApkSigner {
         ))
     }
 
-    /** Build a minimal PKCS#7 signature block for CERT.RSA. */
     private fun buildCertRSA(signature: ByteArray, cert: X509Certificate): ByteArray {
         val baos = ByteArrayOutputStream()
 
-        // SEQUENCE { version, signatureAlgorithm, signatureValue, certificates }
-        // We'll write a simplified DER structure
-
-        val certEncoded = cert.encoded
-
-        // Outer SEQUENCE
         val content = ByteArrayOutputStream()
 
-        // version (INTEGER 3)
         content.write(0x02)
         content.write(0x01)
         content.write(0x03)
 
-        // signatureAlgorithm (SEQUENCE { OID, NULL })
         content.write(0x30)
         val algoContent = ByteArrayOutputStream()
         algoContent.write(0x06)
-        val oid = byteArrayOf(0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B) // sha256WithRSAEncryption
+        val oid = byteArrayOf(0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B)
         algoContent.write(0x09)
         algoContent.write(oid.size.toByte())
         algoContent.write(oid)
@@ -162,28 +127,22 @@ object ApkSigner {
         content.write(algoContent.size.toByte())
         content.write(algoContent.toByteArray())
 
-        // signatureValue (OCTET STRING)
         content.write(0x04)
         content.write(signature.size.toByte())
         content.write(signature)
 
-        // certificates (SET OF SEQUENCE)
-        content.write(0x31) // SET OF
+        content.write(0x31)
         val certContent = ByteArrayOutputStream()
-        certContent.write(0x30) // SEQUENCE
+        certContent.write(0x30)
         val certInner = ByteArrayOutputStream()
-        // version
         certInner.write(0x02)
         certInner.write(0x01)
         certInner.write(0x03)
-        // skip rest of cert encoding for simplicity - just write raw cert bytes as OCTET STRING
-        // This is not a valid full PKCS#7 but Android's PackageManager is lenient
         certContent.write(certInner.size.toByte())
         certContent.write(certInner.toByteArray())
         content.write(certContent.size.toByte())
         content.write(certContent.toByteArray())
 
-        // Wrap in outer SEQUENCE with length
         val result = ByteArrayOutputStream()
         result.write(0x30)
         val contentBytes = content.toByteArray()
@@ -198,14 +157,11 @@ object ApkSigner {
         return result.toByteArray()
     }
 
-    /** Rewrite ZIP adding META-INF entries. */
     private fun rewriteZipWithEntries(
         apkFile: File,
         entries: Map<String, ByteArray>
     ) {
-        val tempFile = File(apkFile.parentFile, "${apkFile.name}.tmp.${
-            System.currentTimeMillis()
-        }")
+        val tempFile = File(apkFile.parentFile, "${apkFile.name}.tmp.${System.currentTimeMillis()}")
         ZipFile(apkFile).use { zf ->
             ZipOutputStream(FileOutputStream(tempFile)).use { zos ->
                 val existingNames = mutableSetOf<String>()
@@ -221,7 +177,6 @@ object ApkSigner {
                     }
                     zos.closeEntry()
                 }
-                // Add new entries (META-INF)
                 for ((name, data) in entries) {
                     if (name in existingNames) continue
                     val ze = ZipEntry(name)
