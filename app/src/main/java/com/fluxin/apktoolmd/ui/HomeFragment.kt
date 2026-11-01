@@ -24,7 +24,6 @@ import com.fluxin.apktoolmd.R
 import com.fluxin.apktoolmd.mod.RemapRule
 import com.fluxin.apktoolmd.mod.ShadowLoader
 import com.fluxin.apktoolmd.util.ApkSigner
-import com.fluxin.apktoolmd.util.BinaryXmlWriter
 import com.fluxin.apktoolmd.util.SurgicalZip
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -964,17 +963,7 @@ class HomeFragment : Fragment() {
                     throw RuntimeException("no template files found in assets")
                 }
 
-                // Patch AndroidManifest.xml binary XML to add overlay permission + mod menu service
-                log("patching AndroidManifest.xml with binary XML editor…")
-                val manifestBytes = extractAndPatchManifest(tempApk)
-                if (manifestBytes.isNotEmpty()) {
-                    addEntries["AndroidManifest.xml"] = manifestBytes
-                    log("injected SYSTEM_ALERT_WINDOW + ModMenuOverlayService into AndroidManifest.xml")
-                } else {
-                    log("WARNING: could not patch AndroidManifest.xml — overlay permission must be granted manually")
-                }
-
-                // Inject into APK using surgical zip patch (replace manifest + add new entries)
+                // Inject into APK using surgical zip patch (add-only)
                 log("injecting ${addEntries.size} entry(ies) into APK…")
                 val err = SurgicalZip.patch(
                     input = tempApk,
@@ -1015,6 +1004,9 @@ class HomeFragment : Fragment() {
                 log(message)
                 log("entries injected: ${addEntries.keys.joinToString(", ")}")
                 log("signed with V1 scheme — install the injected APK, then grant overlay permission in Settings")
+                log("MANIFEST: add to target app AndroidManifest.xml:")
+                log("  <uses-permission android:name=\"android.permission.SYSTEM_ALERT_WINDOW\" />")
+                log("  <service android:name=\"com.fluxin.apktoolmd.modmenu.ModMenuOverlayService\" android:exported=\"true\" />")
 
             } catch (e: Throwable) {
                 message = getString(R.string.inject_r3d_fail, e.message)
@@ -1079,25 +1071,9 @@ class HomeFragment : Fragment() {
             tv.append(line + "\n")
             if (atBottom) {
                 scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
-            }
-        }
-    /** Extract AndroidManifest.xml from the imported APK, patch it with binary XML editor,
-     *  and return the patched bytes. Returns empty array if patching fails. */
-    private fun extractAndPatchManifest(apkFile: File): ByteArray {
-        return try {
-            ZipFile(apkFile).use { zf ->
-                val manifestEntry = zf.getEntry("AndroidManifest.xml") ?: return ByteArray(0)
-                zf.getInputStream(manifestEntry).use { manifestInput ->
-                    manifestInput.readBytes()
-                }
-            }.let { originalManifest ->
-                BinaryXmlWriter.patchManifest(originalManifest).orEmpty()
-            }
-        } catch (e: Exception) {
-            log("manifest patch error: ${e.message}")
-            ByteArray(0)
         }
     }
+    // ------------------------------------------------------- cocos2d scripts
 
     private fun isUe4Entry(name: String): Boolean {
         val n = name.toLowerCase()
