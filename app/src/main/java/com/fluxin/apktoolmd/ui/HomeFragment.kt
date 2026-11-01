@@ -22,6 +22,7 @@ import androidx.core.widget.NestedScrollView
 import com.fluxin.apktoolmd.R
 import com.fluxin.apktoolmd.mod.RemapRule
 import com.fluxin.apktoolmd.mod.ShadowLoader
+import com.fluxin.apktoolmd.util.SurgicalZip
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.card.MaterialCardView
@@ -32,6 +33,8 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
@@ -77,6 +80,8 @@ class HomeFragment : Fragment() {
     private lateinit var shadowClass: EditText
     private lateinit var shadowStatus: TextView
 
+    private lateinit var injectR3dButton: MaterialButton
+
     private var shadowSelectedUri: Uri? = null
     private var shadowLoader: ShadowLoader? = null
 
@@ -120,6 +125,8 @@ class HomeFragment : Fragment() {
         shadowClass = view.findViewById(R.id.shadow_class)
         shadowStatus = view.findViewById(R.id.shadow_status)
 
+        injectR3dButton = view.findViewById(R.id.inject_r3d_template)
+
         restoreShadowLoader()
 
         view.findViewById<View>(R.id.import_apk)?.setOnClickListener { pickApk() }
@@ -129,6 +136,7 @@ class HomeFragment : Fragment() {
         shadowPick.setOnClickListener { pickShadow() }
         shadowLoad.setOnClickListener { loadShadowLoader() }
         shadowTest.setOnClickListener { testShadowClass() }
+        injectR3dButton.setOnClickListener { injectR3dTemplate() }
 
         applyProfileUi()
     }
@@ -888,6 +896,118 @@ class HomeFragment : Fragment() {
                 showSnack(root, message)
             }
         }.start()
+    }
+
+    // ------------------------------------------------------------ R3D template injection
+
+    /** Download R3DNETWORK template files from GitHub and inject them into the imported APK. */
+    private fun injectR3dTemplate() {
+        val root = view ?: return
+        if (selectedUris.isEmpty()) {
+            showSnack(root, getString(R.string.inject_r3d_no_apk))
+            return
+        }
+
+        statusView.text = getString(R.string.inject_r3d_downloading)
+        progressBar.visibility = View.VISIBLE
+        consoleLog.text = ""
+        log("== Inject R3DNETWORK template ==")
+
+        val appContext = requireContext().applicationContext
+        val uri = selectedUris.first()
+
+        // Template files to fetch from GitHub (raw URLs)
+        val templateFiles = listOf(
+            "lib/arm64-v8a/libmodmenu.so" to "https://raw.githubusercontent.com/seedhollow/R3DNETWORK/main/lib/arm64-v8a/libmodmenu.so",
+            "lib/armeabi-v7a/libmodmenu.so" to "https://raw.githubusercontent.com/seedhollow/R3DNETWORK/main/lib/armeabi-v7a/libmodmenu.so",
+            "assets/modmenu_demo.cfg" to "https://raw.githubusercontent.com/seedhollow/R3DNETWORK/main/assets/modmenu_demo.cfg"
+        )
+
+        Thread {
+            val workDir = File("/sdcard/ApkToolMD/r3d_work").apply { deleteRecursively(); mkdirs() }
+            val tempApk = File(workDir, "input.apk")
+            val outApk = File("/sdcard/ApkToolMD/injected", "patched_${System.currentTimeMillis()}.apk")
+            outApk.parentFile.mkdirs()
+
+            var message: String
+            try {
+                // Cache the imported APK locally
+                appContext.contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(tempApk).use { out -> input.copyTo(out) }
+                }
+                log("cached APK: ${tempApk.length()} bytes")
+
+                // Download template files
+                val addEntries = mutableMapOf<String, ByteArray>()
+                var downloaded = 0
+                for ((entryName, urlStr) in templateFiles) {
+                    try {
+                        val data = downloadBytes(urlStr)
+                        if (data.isNotEmpty()) {
+                            addEntries[entryName] = data
+                            downloaded++
+                            log("downloaded: $entryName (${data.size} bytes)")
+                        } else {
+                            log("skipped (empty): $entryName")
+                        }
+                    } catch (e: Throwable) {
+                        log("skipped (download failed): $entryName -> ${e.message}")
+                    }
+                }
+
+                if (downloaded == 0) {
+                    throw RuntimeException("no template files downloaded from GitHub")
+                }
+
+                // Inject into APK using surgical zip patch (add-only)
+                log("injecting ${addEntries.size} entry(ies) into APK…")
+                val err = SurgicalZip.patch(
+                    input = tempApk,
+                    output = outApk,
+                    replace = emptyMap(),
+                    add = addEntries
+                )
+                if (err != null) {
+                    throw RuntimeException("SurgicalZip failed: $err")
+                }
+
+                message = getString(R.string.inject_r3d_done, outApk.absolutePath)
+                log(message)
+                log("entries added: ${addEntries.keys.joinToString(", ")}")
+
+            } catch (e: Throwable) {
+                message = getString(R.string.inject_r3d_fail, e.message)
+                log("ERROR: $message")
+            } finally {
+                tempApk.delete()
+            }
+
+            root.post {
+                statusView.text = message
+                progressBar.visibility = View.GONE
+                showSnack(root, message)
+            }
+        }.start()
+    }
+
+    /** Download bytes from a URL. */
+    private fun downloadBytes(urlStr: String): ByteArray {
+        val url = URL(urlStr)
+        val conn = url.openConnection() as HttpURLConnection
+        conn.connectTimeout = 15000
+        conn.readTimeout = 15000
+        conn.useCaches = false
+        conn.requestMethod = "GET"
+        conn.doInput = true
+        conn.connect()
+
+        if (conn.responseCode != HttpURLConnection.HTTP_OK) {
+            throw RuntimeException("HTTP ${conn.responseCode}: ${conn.responseMessage}")
+        }
+
+        conn.inputStream.use { input ->
+            input.readBytes()
+        }
     }
 
     private fun log(line: String) {

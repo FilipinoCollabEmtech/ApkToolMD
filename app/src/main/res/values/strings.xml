@@ -122,4 +122,13 @@
     <string name="modmenu_no_spread">No Spread</string>
     <string name="modmenu_auto_fire">Auto Fire</string>
     <string name="modmenu_infinite_ammo">Infinite Ammo</string>
+
+    <!-- R3D template injection -->
+    <string name="section_r3d_inject">R3DNETWORK INJECTOR</string>
+    <string name="inject_r3d_template">Inject R3D Template into APK</string>
+    <string name="inject_r3d_downloading">Downloading R3D template…</string>
+    <string name="inject_r3d_injecting">Injecting into APK…</string>
+    <string name="inject_r3d_done">R3D template injected → %1$s</string>
+    <string name="inject_r3d_fail">Injection failed: %1$s</string>
+    <string name="inject_r3d_no_apk">Import an APK first</string>
 </resources>
