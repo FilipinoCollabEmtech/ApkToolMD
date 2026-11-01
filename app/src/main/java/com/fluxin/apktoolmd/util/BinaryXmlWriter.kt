@@ -4,34 +4,22 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
-import java.util.ArrayList
 import java.util.LinkedHashMap
 import java.util.List
 import java.util.Map
 
-/**
- * Binary XML (AXML) reader/writer based on MP-Manager's AndroidBinXmlParser (AOSP apksig).
- *
- * Parses AndroidManifest.xml binary XML and injects:
- *   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
- *   <service android:name="com.fluxin.apktoolmd.modmenu.ModMenuOverlayService" android:exported="true" />
- */
 object BinaryXmlWriter {
 
     private const val CHUNK_TYPE_STRING_POOL = 0x00100001
     private const val CHUNK_TYPE_RES_XML = 0x00100101
     private const val CHUNK_START_ELEMENT = 0x00100102
     private const val CHUNK_END_ELEMENT = 0x00100103
-    private const val CHUNK_RESOURCE_MAP = 0x00080001
 
     private const val FLAG_UTF8 = 0x00000008
 
     private const val ATTR_TYPE_STRING = 3
-    private const val ATTR_TYPE_INT_DEC = 0x10
-    private const val ATTR_TYPE_INT_HEX = 0x11
-    private const val ATTR_TYPE_INT_BOOLEAN = 0x12
 
-    private const val NO_NAMESPACE = 0xFFFFFFFFL
+    private const val NO_NAMESPACE: Int = -1 // 0xFFFFFFFF as signed Int
 
     private const val START_ELEMENT_HEADER_SIZE = 16
     private const val END_ELEMENT_SIZE = 16
@@ -51,7 +39,7 @@ object BinaryXmlWriter {
         buf.order(ByteOrder.LITTLE_ENDIAN)
 
         val xmlChunkStart = findXmlChunkStart(buf, xml) ?: return null
-        val xmlChunkSize = buf.getInt(xmlChunkStart + 4).toInt() and 0xFFFF
+        val xmlChunkSize = (buf.getInt(xmlChunkStart + 4) and 0xFFFF).toInt()
 
         val stringPoolStart = findStringPoolStart(xml, xmlChunkStart + 8, xmlChunkSize - 8) ?: return null
         val stringPool = parseStringPool(xml, stringPoolStart)
@@ -75,7 +63,6 @@ object BinaryXmlWriter {
         val newStringPool = rebuildStringPool(xml, stringPoolStart, stringsToAdd)
 
         val result = ByteArrayOutputStream()
-
         result.write(newStringPool)
 
         val stringPoolEnd = stringPoolStart + newStringPool.size
@@ -93,9 +80,8 @@ object BinaryXmlWriter {
     private fun findXmlChunkStart(buf: ByteBuffer, xml: ByteArray): Int? {
         var pos = 0
         while (pos + 8 <= buf.capacity()) {
-            val type = buf.getInt(pos) and 0xFFFFFFFFL
-            val headerSize = buf.getShort(pos + 2).toInt() and 0xFFFF
-            val chunkSize = buf.getInt(pos + 4).toInt() and 0xFFFF
+            val type = buf.getInt(pos) and 0xFFFF
+            val chunkSize = buf.getInt(pos + 4) and 0xFFFF
             if (chunkSize < 8 || pos + chunkSize > buf.capacity()) break
             if (type == CHUNK_TYPE_RES_XML) return pos
             pos += chunkSize
@@ -108,8 +94,8 @@ object BinaryXmlWriter {
         buf.order(ByteOrder.LITTLE_ENDIAN)
         var pos = xmlStart
         while (pos + 8 <= buf.capacity()) {
-            val type = buf.getInt(pos) and 0xFFFFFFFFL
-            val chunkSize = buf.getInt(pos + 4).toInt() and 0xFFFF
+            val type = buf.getInt(pos) and 0xFFFF
+            val chunkSize = buf.getInt(pos + 4) and 0xFFFF
             if (chunkSize < 8 || pos + chunkSize > buf.capacity()) break
             if (type == CHUNK_TYPE_STRING_POOL) return pos
             pos += chunkSize
@@ -123,18 +109,18 @@ object BinaryXmlWriter {
         buf.order(ByteOrder.LITTLE_ENDIAN)
         buf.position(spStart + 8)
 
-        val spHeaderSize = buf.getInt().toInt() and 0xFFFF
-        val stringCount = buf.getInt().toInt() and 0xFFFF
+        val spHeaderSize = buf.getInt() and 0xFFFF
+        val stringCount = buf.getInt() and 0xFFFF
         buf.getInt() // styleCount
         val flags = buf.getInt() and 0xFFFFFFFFL
         buf.getInt() // stringsOffset
 
         val isUtf8 = (flags and FLAG_UTF8) != 0
-        val stringDataStart = spHeaderSize.toInt()
+        val stringDataStart = spHeaderSize
         val stringIdxStart = stringDataStart + stringCount * 4
 
         for (i in 0 until stringCount) {
-            val strOffset = buf.getInt(stringIdxStart + i * 4) and 0xFFFFFFFFL
+            val strOffset = buf.getInt(stringIdxStart + i * 4) and 0xFFFF
             val str = readStringFromPool(xml, stringDataStart + strOffset.toInt(), isUtf8)
             if (str != null) result[str] = i
         }
@@ -156,9 +142,9 @@ object BinaryXmlWriter {
         buf.order(ByteOrder.LITTLE_ENDIAN)
         var pos = 0
         while (pos + 8 <= buf.capacity()) {
-            val type = buf.getInt(pos) and 0xFFFFFFFFL
+            val type = buf.getInt(pos) and 0xFFFF
             val headerSize = buf.getShort(pos + 2).toInt() and 0xFFFF
-            val chunkSize = buf.getInt(pos + 4).toInt() and 0xFFFF
+            val chunkSize = buf.getInt(pos + 4) and 0xFFFF
             if (chunkSize < 8 || pos + chunkSize > buf.capacity()) break
 
             if (type == CHUNK_END_ELEMENT) {
@@ -167,7 +153,7 @@ object BinaryXmlWriter {
                     buf.position(contentsPos)
                     buf.getInt() // lineNumber
                     buf.getInt() // endNs
-                    val nameId = buf.getInt() and 0xFFFFFFFFL
+                    val nameId = buf.getInt() and 0xFFFF
                     val name = getStringFromPoolByIndex(xml, nameId.toInt())
                     if (name == "manifest") return pos
                 }
@@ -182,23 +168,23 @@ object BinaryXmlWriter {
         buf.order(ByteOrder.LITTLE_ENDIAN)
         var pos = 0
         while (pos + 8 <= buf.capacity()) {
-            val type = buf.getInt(pos) and 0xFFFFFFFFL
-            val chunkSize = buf.getInt(pos + 4).toInt() and 0xFFFF
+            val type = buf.getInt(pos) and 0xFFFF
+            val chunkSize = buf.getInt(pos + 4) and 0xFFFF
             if (chunkSize < 8 || pos + chunkSize > buf.capacity()) break
             if (type == CHUNK_TYPE_STRING_POOL) {
                 buf.position(pos + 8)
                 buf.getInt() // spHeaderSize
-                val stringCount = buf.getInt() and 0xFFFFFFFFL
+                val stringCount = buf.getInt() and 0xFFFF
                 buf.getInt() // styleCount
                 buf.getInt() // flags
-                val stringsOffset = buf.getInt() & 0xFFFFFFFFL
+                val stringsOffset = buf.getInt() and 0xFFFF
                 val isUtf8 = (flags and FLAG_UTF8) != 0
                 val stringDataStart = buf.position()
-                val stringIdxStart = stringDataStart + stringCount.toInt() * 4
+                val stringIdxStart = stringDataStart + stringCount * 4
 
                 if (index >= 0 && index < stringCount) {
                     buf.position(stringIdxStart + index * 4)
-                    val strOffset = buf.getInt() and 0xFFFFFFFFL
+                    val strOffset = buf.getInt() and 0xFFFF
                     return readStringFromPool(xml, stringDataStart.toInt() + strOffset.toInt(), isUtf8)
                 }
                 return null
@@ -239,21 +225,20 @@ object BinaryXmlWriter {
         baos.write(intToBytesLE(CHUNK_START_ELEMENT))
         baos.write(intToBytesLE(chunkSize))
         baos.write(intToBytesLE(0)) // lineNumber
-        baos.write(intToBytesLE(NO_NAMESPACE.toInt())) // startNs
+        baos.write(intToBytesLE(NO_NAMESPACE)) // startNs
         baos.write(intToBytesLE(nameIdx)) // name
         baos.write(intToBytesLE(0)) // flags
         baos.write(intToBytesLE(attrCount)) // attributeCount
-        baos.write(intToBytesLE(0xFFFFFFFF)) // attributeId
-        baos.write(intToBytesLE(0xFFFFFFFF)) // classAttribute
-        baos.write(intToBytesLE(0xFFFFFFFF)) // styleAttribute
+        baos.write(intToBytesLE(0xFFFF)) // attributeId
+        baos.write(intToBytesLE(0xFFFF)) // classAttribute
+        baos.write(intToBytesLE(0xFFFF)) // styleAttribute
 
         for (pair in attributes) {
             val attrNameIdx = pair.first
-            val attrValuePair = pair.second
-            val attrValueIdx = attrValuePair.second
-            val attrType = attrValuePair.first
+            val attrType = pair.second.first
+            val attrValueIdx = pair.second.second
 
-            baos.write(intToBytesLE(NO_NAMESPACE.toInt()))
+            baos.write(intToBytesLE(NO_NAMESPACE))
             baos.write(intToBytesLE(attrNameIdx))
             baos.write(intToBytesLE(attrValueIdx))
             baos.write(intToBytesLE(attrType))
@@ -265,7 +250,7 @@ object BinaryXmlWriter {
         baos.write(intToBytesLE(CHUNK_END_ELEMENT))
         baos.write(intToBytesLE(END_ELEMENT_SIZE))
         baos.write(intToBytesLE(0)) // lineNumber
-        baos.write(intToBytesLE(NO_NAMESPACE.toInt())) // endNs
+        baos.write(intToBytesLE(NO_NAMESPACE)) // endNs
         baos.write(intToBytesLE(nameIdx)) // name
     }
 
@@ -277,18 +262,18 @@ object BinaryXmlWriter {
         val spHeaderSize = buf.getInt().toInt() and 0xFFFF
         val oldStringCount = buf.getInt().toInt() and 0xFFFF
         val styleCount = buf.getInt().toInt() and 0xFFFF
-        val flags = buf.getInt() and 0xFFFFFFFFL
-        val oldStringsOffset = buf.getInt() & 0xFFFFFFFFL
+        val flags = buf.getInt() and 0xFFFF
+        val oldStringsOffset = buf.getInt() and 0xFFFF
 
         val newStringCount = oldStringCount + newStrings.size
-        val newStringsOffset = spHeaderSize.toInt() + oldStringCount * 4
+        val newStringsOffset = spHeaderSize + oldStringCount * 4
 
         val out = ByteArrayOutputStream()
 
         out.write(intToBytesLE(CHUNK_TYPE_STRING_POOL))
         val stringDataSize = newStrings.fold(0) { acc, s -> acc + s.toByteArray(StandardCharsets.UTF_8).size + 2 }
         val newStylesDataSize = if (styleCount > 0) styleCount * 4 else 0
-        val newChunkSize = spHeaderSize.toInt() + newStringCount * 4 + newStringDataSize + newStylesDataSize
+        val newChunkSize = spHeaderSize + newStringCount * 4 + stringDataSize + newStylesDataSize
         out.write(intToBytesLE(newChunkSize))
         out.write(intToBytesLE(newStringCount))
         out.write(intToBytesLE(styleCount))
@@ -296,19 +281,19 @@ object BinaryXmlWriter {
         out.write(intToBytesLE(newStringsOffset))
         out.write(intToBytesLE(stylesOffset))
 
-        buf.position(spStart + 8 + spHeaderSize.toInt())
+        buf.position(spStart + 8 + spHeaderSize)
         val oldIndexData = ByteArray(oldStringCount * 4)
         buf.get(oldIndexData)
         out.write(oldIndexData)
 
-        var currentOffset = newStringsOffset + newStringDataSize
+        var currentOffset = newStringsOffset + stringDataSize
         for (s in newStrings) {
             out.write(intToBytesLE(currentOffset))
             currentOffset += s.toByteArray(StandardCharsets.UTF_8).size + 2
         }
 
-        buf.position(spStart + 8 + oldStringsOffset.toInt())
-        val oldDataSize = (stylesOffset - oldStringsOffset).toInt()
+        buf.position(spStart + 8 + oldStringsOffset)
+        val oldDataSize = (stylesOffset - oldStringsOffset)
         if (oldDataSize > 0) {
             val oldData = ByteArray(oldDataSize)
             buf.get(oldData)
