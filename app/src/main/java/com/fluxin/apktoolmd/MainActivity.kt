@@ -58,6 +58,18 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState == null) {
             bottomNav.selectedItemId = R.id.nav_home
         }
+
+        // Auto-start R3DNETWORK mod menu floating bubble
+        val modIntent = Intent(this, com.fluxin.apktoolmd.modmenu.ModMenuOverlayService::class.java)
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.SYSTEM_ALERT_WINDOW)
+            == PackageManager.PERMISSION_GRANTED) {
+            startService(modIntent)
+        } else {
+            // Request overlay permission via settings intent
+            val settingsIntent = Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                android.net.Uri.parse("package:${packageName}"))
+            startActivity(settingsIntent)
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {

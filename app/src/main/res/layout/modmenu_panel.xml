@@ -86,4 +86,12 @@
         android:textColor="#FFFFFF"
         android:textSize="14sp" />
 
+    <Switch
+        android:id="@+id/switch_fov"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="FOV Changer"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp" />
+
 </LinearLayout>

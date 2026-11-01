@@ -84,6 +84,23 @@ jobs:
           file src/patchelf
           ls -la src/patchelf
 
+      - name: Build R3DNETWORK libmodmenu.so
+        run: |
+          NDK="/usr/local/lib/android/sdk/ndk/21.4.7075529"
+          cd app/src/main/jni/modmenu
+          "$NDK/ndk-build" -j4 -B NDK_PROJECT_PATH=. NDK_APPLICATION_MK=./Application.mk APP_ABI="arm64-v8a armeabi-v7a" APP_OPTIM=release
+          echo "=== modmenu libs ==="
+          find libs -type f
+
+      - name: Copy libmodmenu.so to assets
+        run: |
+          mkdir -p app/src/main/assets/lib/arm64-v8a
+          mkdir -p app/src/main/assets/lib/armeabi-v7a
+          cp app/src/main/jni/modmenu/libs/arm64-v8a/libmodmenu.so app/src/main/assets/lib/arm64-v8a/ 2>/dev/null || true
+          cp app/src/main/jni/modmenu/libs/armeabi-v7a/libmodmenu.so app/src/main/assets/lib/armeabi-v7a/ 2>/dev/null || true
+          ls -la app/src/main/assets/lib/arm64-v8a/ 2>/dev/null || true
+          ls -la app/src/main/assets/lib/armeabi-v7a/ 2>/dev/null || true
+
       - name: Stage dumper binaries into APK assets and jniLibs
         run: |
           mkdir -p app/src/main/assets/dumper

@@ -122,6 +122,7 @@
     <string name="modmenu_no_spread">No Spread</string>
     <string name="modmenu_auto_fire">Auto Fire</string>
     <string name="modmenu_infinite_ammo">Infinite Ammo</string>
+    <string name="modmenu_fov">FOV Changer</string>
 
     <!-- R3D template injection -->
     <string name="section_r3d_inject">R3DNETWORK INJECTOR</string>

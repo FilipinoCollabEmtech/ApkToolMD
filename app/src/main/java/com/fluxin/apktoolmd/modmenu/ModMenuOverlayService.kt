@@ -116,6 +116,8 @@ class ModMenuOverlayService : Service() {
         val switchNoSpread: Switch = panelView!!.findViewById(R.id.switch_no_spread)
         val switchAutoFire: Switch = panelView!!.findViewById(R.id.switch_auto_fire)
         val switchInfiniteAmmo: Switch = panelView!!.findViewById(R.id.switch_infinite_ammo)
+        val switchMaster: Switch = panelView!!.findViewById(R.id.switch_master)
+        val switchFOV: Switch = panelView!!.findViewById(R.id.switch_fov)
 
         switchGodMode.isChecked = ModMenuLoader.isGodMode()
         switchAimAssist.isChecked = ModMenuLoader.isAimAssist()
@@ -124,6 +126,8 @@ class ModMenuOverlayService : Service() {
         switchNoSpread.isChecked = ModMenuLoader.isNoSpread()
         switchAutoFire.isChecked = ModMenuLoader.isAutoFire()
         switchInfiniteAmmo.isChecked = ModMenuLoader.isInfiniteAmmo()
+        switchMaster.isChecked = ModMenuLoader.isEnabled()
+        switchFOV.isChecked = ModMenuLoader.isEnabled() // FOV uses master switch state as toggle
 
         switchGodMode.setOnCheckedChangeListener { _, isChecked ->
             ModMenuLoader.setGodMode(isChecked)
@@ -145,6 +149,15 @@ class ModMenuOverlayService : Service() {
         }
         switchInfiniteAmmo.setOnCheckedChangeListener { _, isChecked ->
             ModMenuLoader.setInfiniteAmmo(isChecked)
+        }
+        switchMaster.setOnCheckedChangeListener { _, isChecked ->
+            ModMenuLoader.setEnabled(isChecked)
+        }
+        switchFOV.setOnCheckedChangeListener { _, isChecked ->
+            ModMenuLoader.setEnabled(isChecked)
+            if (isChecked) {
+                ModMenuLoader.setFOV(110.0f)
+            }
         }
 
         val txtTitle: TextView = panelView!!.findViewById(R.id.txt_menu_title)
