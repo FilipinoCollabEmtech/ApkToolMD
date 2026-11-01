@@ -1005,7 +1005,7 @@ class HomeFragment : Fragment() {
             throw RuntimeException("HTTP ${conn.responseCode}: ${conn.responseMessage}")
         }
 
-        conn.inputStream.use { input ->
+        return conn.inputStream.use { input ->
             input.readBytes()
         }
     }
