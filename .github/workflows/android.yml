@@ -88,7 +88,7 @@ jobs:
         run: |
           NDK="/usr/local/lib/android/sdk/ndk/21.4.7075529"
           cd app/src/main/jni/modmenu
-          "$NDK/ndk-build" -j4 -B NDK_PROJECT_PATH=. NDK_APPLICATION_MK=./Application.mk APP_ABI="arm64-v8a armeabi-v7a" APP_OPTIM=release
+          "$NDK/ndk-build" -j4 -B NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=./Android.mk NDK_APPLICATION_MK=./Application.mk APP_ABI="arm64-v8a armeabi-v7a" APP_OPTIM=release
           echo "=== modmenu libs ==="
           find libs -type f
 
