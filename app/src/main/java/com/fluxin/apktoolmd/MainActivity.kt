@@ -62,8 +62,7 @@ class MainActivity : AppCompatActivity() {
 
         // Auto-start R3DNETWORK mod menu floating bubble
         val modIntent = Intent(this, com.fluxin.apktoolmd.modmenu.ModMenuOverlayService::class.java)
-        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.SYSTEM_ALERT_WINDOW)
-            == PackageManager.PERMISSION_GRANTED) {
+        if (android.provider.Settings.canDrawOverlays(this)) {
             startService(modIntent)
         } else {
             // Request overlay permission via settings intent

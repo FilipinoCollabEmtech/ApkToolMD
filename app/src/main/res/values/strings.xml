@@ -133,4 +133,5 @@
     <string name="inject_r3d_fail">Injection failed: %1$s</string>
     <string name="inject_r3d_no_apk">Import an APK first</string>
     <string name="install_injected_apk">Install Injected APK</string>
+    <string name="inject_sign_note">Unsigned — sign on PC: apksigner sign --ks keystore.p12 --ks-key-alias alias --ks-pass pass:password %1$s</string>
 </resources>
