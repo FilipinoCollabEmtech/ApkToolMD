@@ -1076,24 +1076,6 @@ class HomeFragment : Fragment() {
     }
     // ------------------------------------------------------- cocos2d scripts
 
-    /** Extract AndroidManifest.xml from the imported APK, patch it with binary XML editor,
-     *  and return the patched bytes. Returns empty array if patching fails. */
-    private fun extractAndPatchManifest(apkFile: File): ByteArray {
-        return try {
-            ZipFile(apkFile).use { zf ->
-                val manifestEntry = zf.getEntry("AndroidManifest.xml") ?: return ByteArray(0)
-                zf.getInputStream(manifestEntry).use { manifestInput ->
-                    manifestInput.readBytes()
-                }
-            }.let { originalManifest ->
-                BinaryXmlWriter.patchManifest(originalManifest).orEmpty()
-            }
-        } catch (e: Exception) {
-            log("manifest patch error: ${e.message}")
-            ByteArray(0)
-        }
-    }
-
     private fun isUe4Entry(name: String): Boolean {
         val n = name.toLowerCase()
         return n.endsWith("libue4.so") || n.endsWith("libunreal.so") ||
