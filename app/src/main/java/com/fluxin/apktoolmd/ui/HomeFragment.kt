@@ -973,12 +973,13 @@ class HomeFragment : Fragment() {
                     throw RuntimeException("SurgicalZip failed: $err")
                 }
 
-                // Copy patched APK to output
+                // Copy patched APK to output (unsigned — sign manually with apksigner on PC)
                 patchedApk.copyTo(injectedApk, overwrite = true)
 
                 message = getString(R.string.inject_r3d_done, injectedApk.absolutePath)
                 log(message)
                 log("entries injected: ${addEntries.keys.joinToString(", ")}")
+                log("NOTE: APK is unsigned — sign with 'apksigner --ks keystore.p12 --ks-key-alias alias --ks-pass pass:password patched.apk' on PC")
 
             } catch (e: Throwable) {
                 message = getString(R.string.inject_r3d_fail, e.message)
@@ -1020,6 +1021,15 @@ class HomeFragment : Fragment() {
 
         if (intent.resolveActivity(appContext.packageManager) != null) {
             startActivity(intent)
+
+            // Prompt to grant overlay permission for the patched app
+            val overlayIntent = Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                android.net.Uri.parse("package:" + latest.name.substringBeforeLast(".")))
+            try {
+                startActivity(overlayIntent)
+            } catch (e: Exception) {
+                showSnack(root, "Installed. Manually grant 'Display over other apps' to the patched app in Settings.")
+            }
         } else {
             showSnack(root, "No app installed to install APKs.")
         }
