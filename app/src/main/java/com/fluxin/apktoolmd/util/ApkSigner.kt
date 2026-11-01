@@ -56,7 +56,7 @@ object ApkSigner {
                 entrySig.initSign(privateKey)
                 zf.getInputStream(entry).use { is ->
                     val buffer = ByteArray(8192)
-                    var read = is.read(buffer)
+                    var read: Int = is.read(buffer)
                     while (read > 0) {
                         entrySig.update(buffer, 0, read)
                         read = is.read(buffer)
@@ -107,12 +107,11 @@ object ApkSigner {
     }
 
     private fun buildCertRSA(signature: ByteArray, cert: X509Certificate): ByteArray {
-        // Simple CERT.RSA: signature + certificate concatenated with length prefixes
         val baos = ByteArrayOutputStream()
-        baos.write(signature.size.toInt().toByte())
+        baos.write(signature.size.toInt())
         baos.write(signature)
         val certBytes = cert.encoded
-        baos.write(certBytes.size.toInt().toByte())
+        baos.write(certBytes.size.toInt())
         baos.write(certBytes)
         return baos.toByteArray()
     }
