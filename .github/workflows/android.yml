@@ -101,6 +101,44 @@ jobs:
           ls -la app/src/main/assets/lib/arm64-v8a/ 2>/dev/null || true
           ls -la app/src/main/assets/lib/armeabi-v7a/ 2>/dev/null || true
 
+      - name: Compile R3DNETWORK mod menu classes to DEX
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          D8="$(find "$SDK/build-tools" -type f -name d8 2>/dev/null | head -1)"
+          mkdir -p /tmp/modmenu_dex
+          # Compile the mod menu Kotlin classes to DEX
+          "$D8" --release --output /tmp/modmenu_dex \
+            --lib "$SDK/platforms/android-29/android.jar" \
+            app/src/main/java/com/fluxin/apktoolmd/modmenu/ModMenuLoader.kt \
+            app/src/main/java/com/fluxin/apktoolmd/modmenu/ModMenuOverlayService.kt \
+            app/src/main/java/com/fluxin/apktoolmd/mod/RemapRule.kt 2>&1 || true
+          # If d8 can't compile Kotlin directly, use kotlinc then d8
+          if [ ! -f /tmp/modmenu_dex/classes2.dex ] && [ ! -f /tmp/modmenu_dex/classes.dex ]; then
+            echo "d8 direct Kotlin compile failed, trying kotlinc + d8..."
+            KOTLINC="$(find / -name kotlinc -type f 2>/dev/null | head -1)"
+            if [ -n "$KOTLINC" ]; then
+              mkdir -p /tmp/modmenu_classes
+              "$KOTLINC" -d /tmp/modmenu_classes \
+                -cp "$SDK/platforms/android-29/android.jar" \
+                app/src/main/java/com/fluxin/apktoolmd/modmenu/ModMenuLoader.kt \
+                app/src/main/java/com/fluxin/apktoolmd/modmenu/ModMenuOverlayService.kt \
+                app/src/main/java/com/fluxin/apktoolmd/mod/RemapRule.kt 2>&1 || true
+              "$D8" --release --output /tmp/modmenu_dex /tmp/modmenu_classes/*.class 2>&1 || true
+            fi
+          fi
+          # Rename to classes2.dex for injection
+          if [ -f /tmp/modmenu_dex/classes.dex ]; then
+            cp /tmp/modmenu_dex/classes.dex /tmp/modmenu_dex/classes2.dex
+          fi
+          echo "=== modmenu dex ==="
+          find /tmp/modmenu_dex -type f 2>/dev/null || true
+
+      - name: Copy modmenu classes2.dex to assets
+        run: |
+          mkdir -p app/src/main/assets/dex
+          cp /tmp/modmenu_dex/classes2.dex app/src/main/assets/dex/classes2.dex 2>/dev/null || true
+          ls -la app/src/main/assets/dex/ 2>/dev/null || true
+
       - name: Stage dumper binaries into APK assets and jniLibs
         run: |
           mkdir -p app/src/main/assets/dumper

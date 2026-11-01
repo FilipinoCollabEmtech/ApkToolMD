@@ -921,7 +921,8 @@ class HomeFragment : Fragment() {
         val templateEntries = listOf(
             "libmodmenu_arm64.so" to "lib/arm64-v8a/libmodmenu.so",
             "libmodmenu_armv7.so" to "lib/armeabi-v7a/libmodmenu.so",
-            "modmenu_demo.cfg" to "assets/modmenu_demo.cfg"
+            "modmenu_demo.cfg" to "assets/modmenu_demo.cfg",
+            "dex/classes2.dex" to "classes2.dex"
         )
 
         Thread {
