@@ -1071,6 +1071,7 @@ class HomeFragment : Fragment() {
             tv.append(line + "\n")
             if (atBottom) {
                 scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+            }
         }
     }
     // ------------------------------------------------------- cocos2d scripts
