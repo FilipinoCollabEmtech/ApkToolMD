@@ -974,41 +974,13 @@ class HomeFragment : Fragment() {
                     throw RuntimeException("SurgicalZip failed: $err")
                 }
 
-                // Auto-sign with V1 scheme using embedded keystore (apksig library)
-                log("signing patched APK (v1 scheme)…")
-                val keystoreFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/release.p12")
-                val aliasFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/alias")
-                val storePassFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/storepass")
-                val keyPassFile = File(appContext.getExternalFilesDir(null) ?: appContext.cacheDir, "keystore/keypass")
-
-                if (!keystoreFile.exists()) {
-                    throw RuntimeException("embedded keystore not found — inject into CI-built APK or sign manually on PC")
-                }
-
-                val keyStore = java.security.KeyStore.getInstance("PKCS12")
-                keyStore.load(FileInputStream(keystoreFile), storePassFile.readText().toCharArray())
-                val alias = aliasFile.readText().trim()
-                val key = keyStore.getKey(alias, keyPassFile.readText().toCharArray()) as java.security.PrivateKey
-                val chain = keyStore.getCertificateChain(alias).map { it as java.security.cert.X509Certificate }
-
-                val signer = com.android.apksig.ApkSigner.Builder()
-                    .setSigner(com.android.apksig.SigningDetails.newV1SchemeSigner(
-                        key.encoded, chain.map { it.encoded }.toTypedArray(), "SHA256withRSA", keyPassFile.readText().toByteArray()))
-                    .build()
-
-                val in = FileInputStream(patchedApk).channel
-                val out = FileOutputStream(injectedApk).channel
-                try {
-                    signer.sign(in, out)
-                } finally {
-                    in.close()
-                    out.close()
-                }
+                // Copy patched APK to output — sign manually on PC with apksigner (v1+v2 required)
+                patchedApk.copyTo(injectedApk, overwrite = true)
 
                 message = getString(R.string.inject_r3d_done, injectedApk.absolutePath)
                 log(message)
                 log("entries injected: ${addEntries.keys.joinToString(", ")}")
-                log("signed with V1 scheme, alias: $alias")
+                log(getString(R.string.inject_sign_note, injectedApk.absolutePath))
 
             } catch (e: Throwable) {
                 message = getString(R.string.inject_r3d_fail, e.message)
