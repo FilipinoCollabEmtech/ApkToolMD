@@ -88,11 +88,11 @@ object ApkSigner {
             sfLines.add("")
         }
 
-        val sf = Signature.getInstance(SIG_ALGORITHM)
-        sf.initSign(privateKey)
+        val sfSig = Signature.getInstance(SIG_ALGORITHM)
+        sfSig.initSign(privateKey)
         val sfContent = sfLines.joinToString("\n")
-        sf.update(sfContent.toByteArray(Charsets.UTF_8))
-        val rsaSignature = sf.sign()
+        sfSig.update(sfContent.toByteArray(Charsets.UTF_8))
+        val rsaSignature = sfSig.sign()
 
         val certSFContent = sfLines.joinToString("\n")
         val certSFBytes = certSFContent.toByteArray(Charsets.UTF_8)
@@ -107,54 +107,14 @@ object ApkSigner {
     }
 
     private fun buildCertRSA(signature: ByteArray, cert: X509Certificate): ByteArray {
+        // Simple CERT.RSA: signature + certificate concatenated with length prefixes
         val baos = ByteArrayOutputStream()
-
-        val content = ByteArrayOutputStream()
-
-        content.write(0x02)
-        content.write(0x01)
-        content.write(0x03)
-
-        content.write(0x30)
-        val algoContent = ByteArrayOutputStream()
-        algoContent.write(0x06)
-        val oid = byteArrayOf(0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B)
-        algoContent.write(0x09)
-        algoContent.write(oid.size.toInt().toByte())
-        algoContent.write(oid)
-        algoContent.write(0x05)
-        algoContent.write(0x00)
-        content.write(algoContent.size.toInt().toByte())
-        content.write(algoContent.toByteArray())
-
-        content.write(0x04)
-        content.write(signature.size.toInt().toByte())
-        content.write(signature)
-
-        content.write(0x31)
-        val certContent = ByteArrayOutputStream()
-        certContent.write(0x30)
-        val certInner = ByteArrayOutputStream()
-        certInner.write(0x02)
-        certInner.write(0x01)
-        certInner.write(0x03)
-        certContent.write(certInner.size.toInt().toByte())
-        certContent.write(certInner.toByteArray())
-        content.write(certContent.size.toInt().toByte())
-        content.write(certContent.toByteArray())
-
-        val result = ByteArrayOutputStream()
-        result.write(0x30)
-        val contentBytes = content.toByteArray()
-        if (contentBytes.size < 128) {
-            result.write(contentBytes.size.toInt().toByte())
-        } else {
-            result.write(0x81)
-            result.write(contentBytes.size.toInt().toByte())
-        }
-        result.write(contentBytes)
-
-        return result.toByteArray()
+        baos.write(signature.size.toInt().toByte())
+        baos.write(signature)
+        val certBytes = cert.encoded
+        baos.write(certBytes.size.toInt().toByte())
+        baos.write(certBytes)
+        return baos.toByteArray()
     }
 
     private fun rewriteZipWithEntries(
