@@ -33,8 +33,6 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
@@ -900,7 +898,7 @@ class HomeFragment : Fragment() {
 
     // ------------------------------------------------------------ R3D template injection
 
-    /** Download R3DNETWORK template files from GitHub and inject them into the imported APK. */
+    /** Inject R3DNETWORK demo template files (from local assets) into the imported APK. */
     private fun injectR3dTemplate() {
         val root = view ?: return
         if (selectedUris.isEmpty()) {
@@ -916,11 +914,11 @@ class HomeFragment : Fragment() {
         val appContext = requireContext().applicationContext
         val uri = selectedUris.first()
 
-        // Template files to fetch from GitHub (raw URLs)
-        val templateFiles = listOf(
-            "lib/arm64-v8a/libmodmenu.so" to "https://raw.githubusercontent.com/seedhollow/R3DNETWORK/main/lib/arm64-v8a/libmodmenu.so",
-            "lib/armeabi-v7a/libmodmenu.so" to "https://raw.githubusercontent.com/seedhollow/R3DNETWORK/main/lib/armeabi-v7a/libmodmenu.so",
-            "assets/modmenu_demo.cfg" to "https://raw.githubusercontent.com/seedhollow/R3DNETWORK/main/assets/modmenu_demo.cfg"
+        // Template files from local assets -> ZIP entry name inside the APK
+        val templateEntries = listOf(
+            "libmodmenu_arm64.so" to "lib/arm64-v8a/libmodmenu.so",
+            "libmodmenu_armv7.so" to "lib/armeabi-v7a/libmodmenu.so",
+            "modmenu_demo.cfg" to "assets/modmenu_demo.cfg"
         )
 
         Thread {
@@ -937,26 +935,26 @@ class HomeFragment : Fragment() {
                 }
                 log("cached APK: ${tempApk.length()} bytes")
 
-                // Download template files
+                // Read template files from assets
                 val addEntries = mutableMapOf<String, ByteArray>()
-                var downloaded = 0
-                for ((entryName, urlStr) in templateFiles) {
+                var loaded = 0
+                for ((assetName, zipEntry) in templateEntries) {
                     try {
-                        val data = downloadBytes(urlStr)
+                        val data = appContext.assets.open(assetName).use { it.readBytes() }
                         if (data.isNotEmpty()) {
-                            addEntries[entryName] = data
-                            downloaded++
-                            log("downloaded: $entryName (${data.size} bytes)")
+                            addEntries[zipEntry] = data
+                            loaded++
+                            log("loaded asset: $assetName -> $zipEntry (${data.size} bytes)")
                         } else {
-                            log("skipped (empty): $entryName")
+                            log("skipped (empty): $assetName")
                         }
                     } catch (e: Throwable) {
-                        log("skipped (download failed): $entryName -> ${e.message}")
+                        log("skipped (asset missing): $assetName -> ${e.message}")
                     }
                 }
 
-                if (downloaded == 0) {
-                    throw RuntimeException("no template files downloaded from GitHub")
+                if (loaded == 0) {
+                    throw RuntimeException("no template files found in assets")
                 }
 
                 // Inject into APK using surgical zip patch (add-only)
@@ -988,26 +986,6 @@ class HomeFragment : Fragment() {
                 showSnack(root, message)
             }
         }.start()
-    }
-
-    /** Download bytes from a URL. */
-    private fun downloadBytes(urlStr: String): ByteArray {
-        val url = URL(urlStr)
-        val conn = url.openConnection() as HttpURLConnection
-        conn.connectTimeout = 15000
-        conn.readTimeout = 15000
-        conn.useCaches = false
-        conn.requestMethod = "GET"
-        conn.doInput = true
-        conn.connect()
-
-        if (conn.responseCode != HttpURLConnection.HTTP_OK) {
-            throw RuntimeException("HTTP ${conn.responseCode}: ${conn.responseMessage}")
-        }
-
-        return conn.inputStream.use { input ->
-            input.readBytes()
-        }
     }
 
     private fun log(line: String) {
