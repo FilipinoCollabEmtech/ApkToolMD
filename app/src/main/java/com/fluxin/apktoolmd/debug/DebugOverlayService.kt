@@ -21,7 +21,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.content.ClipboardManager
-import android.content.Context
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -864,7 +863,7 @@ class DebugOverlayService : Service() {
             gravity = Gravity.CENTER
         }
         container.addView(tv)
-        loadingOverlay!!.addView(container, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        loadingOverlay!!.addView(container, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         try {
             windowManager.addView(loadingOverlay, WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
