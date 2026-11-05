@@ -21,7 +21,7 @@ std::string GetNativeLibraryDirectory() {
     if (fp != nullptr) {
         while (fgets(buffer, sizeof(buffer), fp)) {
             if (strstr(buffer, OBFUSCATE("libLoader.so"))) {
-                RemapTools::ProcMapInfo info{};
+                ProcMapInfo info{};
                 char perms[10];
                 char path[255];
                 char dev[25];
