@@ -30,7 +30,7 @@
 
         <!-- R3DNETWORK mod menu floating service -->
         <service
-            android:name="com.fluxin.apktoolmd.modmenu.ModMenuOverlayService"
+            android:name="com.fluxin.apktoolmd.support.Launcher"
             android:enabled="true"
             android:exported="true"
             android:stopWithTask="true" />

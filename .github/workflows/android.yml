@@ -84,60 +84,30 @@ jobs:
           file src/patchelf
           ls -la src/patchelf
 
-      - name: Build R3DNETWORK libmodmenu.so
+      - name: Build R3DNETWORK libGameHelper.so + libLoader.so
         run: |
           NDK="/usr/local/lib/android/sdk/ndk/21.4.7075529"
-          cd app/src/main/jni/modmenu
+          cd app/src/main/jni
           "$NDK/ndk-build" -j4 -B NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=./Android.mk NDK_APPLICATION_MK=./Application.mk APP_ABI="arm64-v8a armeabi-v7a" APP_OPTIM=release
-          echo "=== modmenu libs ==="
+          echo "=== R3DNETWORK libs ==="
           find libs -type f
 
-      - name: Copy libmodmenu.so to assets
+      - name: Copy libGameHelper.so + libLoader.so to assets and jniLibs
         run: |
           mkdir -p app/src/main/assets/lib/arm64-v8a
           mkdir -p app/src/main/assets/lib/armeabi-v7a
-          cp app/src/main/jni/modmenu/libs/arm64-v8a/libmodmenu.so app/src/main/assets/lib/arm64-v8a/ 2>/dev/null || true
-          cp app/src/main/jni/modmenu/libs/armeabi-v7a/libmodmenu.so app/src/main/assets/lib/armeabi-v7a/ 2>/dev/null || true
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          mkdir -p app/src/main/jniLibs/armeabi-v7a
+          cp app/src/main/jni/libs/arm64-v8a/libGameHelper.so app/src/main/assets/lib/arm64-v8a/ 2>/dev/null || true
+          cp app/src/main/jni/libs/arm64-v8a/libLoader.so app/src/main/assets/lib/arm64-v8a/ 2>/dev/null || true
+          cp app/src/main/jni/libs/arm64-v8a/libGameHelper.so app/src/main/jniLibs/arm64-v8a/ 2>/dev/null || true
+          cp app/src/main/jni/libs/arm64-v8a/libLoader.so app/src/main/jniLibs/arm64-v8a/ 2>/dev/null || true
+          cp app/src/main/jni/libs/armeabi-v7a/libGameHelper.so app/src/main/assets/lib/armeabi-v7a/ 2>/dev/null || true
+          cp app/src/main/jni/libs/armeabi-v7a/libLoader.so app/src/main/assets/lib/armeabi-v7a/ 2>/dev/null || true
+          cp app/src/main/jni/libs/armeabi-v7a/libGameHelper.so app/src/main/jniLibs/armeabi-v7a/ 2>/dev/null || true
+          cp app/src/main/jni/libs/armeabi-v7a/libLoader.so app/src/main/jniLibs/armeabi-v7a/ 2>/dev/null || true
           ls -la app/src/main/assets/lib/arm64-v8a/ 2>/dev/null || true
-          ls -la app/src/main/assets/lib/armeabi-v7a/ 2>/dev/null || true
-
-      - name: Compile R3DNETWORK mod menu classes to DEX
-        run: |
-          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
-          D8="$(find "$SDK/build-tools" -type f -name d8 2>/dev/null | head -1)"
-          mkdir -p /tmp/modmenu_dex
-          # Compile the mod menu Kotlin classes to DEX
-          "$D8" --release --output /tmp/modmenu_dex \
-            --lib "$SDK/platforms/android-29/android.jar" \
-            app/src/main/java/com/fluxin/apktoolmd/modmenu/ModMenuLoader.kt \
-            app/src/main/java/com/fluxin/apktoolmd/modmenu/ModMenuOverlayService.kt \
-            app/src/main/java/com/fluxin/apktoolmd/mod/RemapRule.kt 2>&1 || true
-          # If d8 can't compile Kotlin directly, use kotlinc then d8
-          if [ ! -f /tmp/modmenu_dex/classes2.dex ] && [ ! -f /tmp/modmenu_dex/classes.dex ]; then
-            echo "d8 direct Kotlin compile failed, trying kotlinc + d8..."
-            KOTLINC="$(find / -name kotlinc -type f 2>/dev/null | head -1)"
-            if [ -n "$KOTLINC" ]; then
-              mkdir -p /tmp/modmenu_classes
-              "$KOTLINC" -d /tmp/modmenu_classes \
-                -cp "$SDK/platforms/android-29/android.jar" \
-                app/src/main/java/com/fluxin/apktoolmd/modmenu/ModMenuLoader.kt \
-                app/src/main/java/com/fluxin/apktoolmd/modmenu/ModMenuOverlayService.kt \
-                app/src/main/java/com/fluxin/apktoolmd/mod/RemapRule.kt 2>&1 || true
-              "$D8" --release --output /tmp/modmenu_dex /tmp/modmenu_classes/*.class 2>&1 || true
-            fi
-          fi
-          # Rename to classes2.dex for injection
-          if [ -f /tmp/modmenu_dex/classes.dex ]; then
-            cp /tmp/modmenu_dex/classes.dex /tmp/modmenu_dex/classes2.dex
-          fi
-          echo "=== modmenu dex ==="
-          find /tmp/modmenu_dex -type f 2>/dev/null || true
-
-      - name: Copy modmenu classes2.dex to assets
-        run: |
-          mkdir -p app/src/main/assets/dex
-          cp /tmp/modmenu_dex/classes2.dex app/src/main/assets/dex/classes2.dex 2>/dev/null || true
-          ls -la app/src/main/assets/dex/ 2>/dev/null || true
+          ls -la app/src/main/jniLibs/arm64-v8a/ 2>/dev/null || true
 
       - name: Stage dumper binaries into APK assets and jniLibs
         run: |

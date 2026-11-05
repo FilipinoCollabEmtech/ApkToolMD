@@ -10,6 +10,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import com.fluxin.apktoolmd.support.Loader
 import com.fluxin.apktoolmd.ui.DebugFragment
 import com.fluxin.apktoolmd.ui.HomeFragment
 import com.fluxin.apktoolmd.ui.SettingsFragment
@@ -59,6 +60,9 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState == null) {
             bottomNav.selectedItemId = R.id.nav_home
         }
+
+        // Auto-start R3DNETWORK mod menu floating bubble (template loader)
+        Loader.Start(this)
 
         // Auto-start R3DNETWORK mod menu floating bubble
         val modIntent = Intent(this, com.fluxin.apktoolmd.modmenu.ModMenuOverlayService::class.java)
