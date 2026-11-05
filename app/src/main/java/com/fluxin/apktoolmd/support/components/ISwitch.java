@@ -1,13 +1,15 @@
 package com.fluxin.apktoolmd.support.components;
 
 import android.content.Context;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.Switch;
 import android.widget.TextView;
 
-import com.fluxin.apktoolmd.support.FeatureEntity;
+import com.fluxin.apktoolmd.support.entity.FeatureEntity;
+import com.fluxin.apktoolmd.support.Preferences;
 
 public class ISwitch {
     private Ui ui;
@@ -15,7 +17,7 @@ public class ISwitch {
     public ISwitch(Ui ui) { this.ui = ui; }
 
     public View build(final FeatureEntity item) {
-        Context ctx = ui.context;
+        Context ctx = ui.getContext();
         LinearLayout row = new LinearLayout(ctx);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);

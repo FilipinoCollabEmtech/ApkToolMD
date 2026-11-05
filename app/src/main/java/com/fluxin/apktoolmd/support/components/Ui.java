@@ -7,10 +7,14 @@ import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import com.fluxin.apktoolmd.support.entity.FeatureEntity;
+
 public class Ui {
     public interface Host {
         void beginEdit(android.widget.EditText field);
         void endEdit();
+        void openPage(String title, java.util.List<FeatureEntity> children);
+        void closePage();
     }
 
     private Context context;

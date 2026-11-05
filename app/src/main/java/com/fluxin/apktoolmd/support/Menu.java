@@ -206,7 +206,7 @@ public class Menu extends BaseMenu implements Ui.Host {
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding((int) ui.dp(18), (int) ui.dp(4), (int) ui.dp(18), 0);
 
-        View mark = new MarkView(context);
+        View mark = new MarkView(getContext());
         header.addView(mark, new LinearLayout.LayoutParams((int) ui.dp(7), (int) ui.dp(15)));
 
         titleText = ui.text("", Theme.TEXT_TITLE, Theme.TEXT, Typeface.create(ui.bold, Typeface.BOLD_ITALIC));
@@ -264,7 +264,7 @@ public class Menu extends BaseMenu implements Ui.Host {
         java.util.List<FeatureEntity> loose = new java.util.ArrayList<>();
         for (FeatureEntity item : features) {
             if ("ITab".equals(item.type)) {
-                tabs.add(tab(item.name, item.icon, item.children != null ? item.children : new java.util.ArrayList<>(), false));
+                tabs.add(tab(item.name, item.icon, item.children != null ? item.children : new java.util.ArrayList<FeatureEntity>(), false));
             } else {
                 loose.add(item);
             }

@@ -8,7 +8,7 @@ import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.TextView;
 
-import com.fluxin.apktoolmd.support.FeatureEntity;
+import com.fluxin.apktoolmd.support.entity.FeatureEntity;
 import com.fluxin.apktoolmd.support.Preferences;
 
 public class IRadioButton {

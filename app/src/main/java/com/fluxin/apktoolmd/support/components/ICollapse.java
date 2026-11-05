@@ -5,7 +5,7 @@ import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import com.fluxin.apktoolmd.support.FeatureEntity;
+import com.fluxin.apktoolmd.support.entity.FeatureEntity;
 
 public class ICollapse {
     private Ui ui;
