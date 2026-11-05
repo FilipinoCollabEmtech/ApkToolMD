@@ -4,10 +4,13 @@ import static android.view.ViewGroup.LayoutParams.MATCH_PARENT;
 import static android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
 
 import android.annotation.SuppressLint;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
@@ -15,6 +18,8 @@ import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.TextUtils;
 import android.util.Base64;
 import android.util.Log;
@@ -26,6 +31,7 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -98,6 +104,18 @@ public class Menu extends BaseMenu implements Ui.Host {
     private int bubbleX, bubbleY;
     private EditText editing;
 
+    // ---------------- Debug / error system ----------------
+    private final java.util.ArrayList<String> logLines = new java.util.ArrayList<>();
+    private ScrollView debugScroll;
+    private TextView debugLog;
+    private LinearLayout debugPanel;
+    private FrameLayout errorOverlay;
+    private FrameLayout loadingOverlay;
+    private boolean debugVisible = false;
+    private Handler mainHandler = new Handler(Looper.getMainLooper());
+    private int debugTapCount = 0;
+    private final Handler debugTapHandler = new Handler(Looper.getMainLooper());
+
     private static class Tab {
         String name, icon;
         java.util.List<FeatureEntity> items;
@@ -157,10 +175,23 @@ public class Menu extends BaseMenu implements Ui.Host {
         panel.setVisibility(View.GONE);
         root.addView(panel);
 
+        buildDebugPanel(context);
+        buildErrorOverlay(context);
+        buildLoadingOverlay(context);
+
         creditText = ui.text("", Theme.TEXT_BODY, Theme.TEXT, ui.regular);
         creditText.setLineSpacing(ui.dp(2), 1f);
 
-        Init(context, titleText, creditText);
+        log("Menu created. Calling native Init…");
+        try {
+            Init(context, titleText, creditText);
+            log("Native Init completed successfully.");
+            hideLoading();
+        } catch (Throwable t) {
+            log("Native Init threw: " + t.getMessage());
+            showError("Native Init failed: " + (t.getMessage() != null ? t.getMessage() : t.toString()));
+            hideLoading();
+        }
     }
 
     private LinearLayout buildPanel(Context context) {
@@ -199,6 +230,156 @@ public class Menu extends BaseMenu implements Ui.Host {
         body.addView(contentScroll, new LinearLayout.LayoutParams(0, MATCH_PARENT, 1f));
 
         return panel;
+    }
+
+    // ---------------- Debug panel ----------------
+    private void buildDebugPanel(Context context) {
+        debugPanel = new LinearLayout(context);
+        debugPanel.setOrientation(LinearLayout.VERTICAL);
+        debugPanel.setVisibility(View.GONE);
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.parseColor("#1A1A1A"));
+        bg.setCornerRadius((float) Theme.PANEL_RADIUS);
+        bg.setStroke((int) Theme.PANEL_STROKE, Color.parseColor("#333333"));
+        debugPanel.setBackground(bg);
+
+        LinearLayout header = new LinearLayout(context);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setPadding((int) ui.dp(8), (int) ui.dp(6), (int) ui.dp(8), (int) ui.dp(6));
+
+        TextView title = ui.text("DEBUG LOG", Theme.TEXT_TITLE, Theme.TEXT, ui.bold);
+        header.addView(title);
+
+        Button copyBtn = new Button(context);
+        copyBtn.setText("Copy");
+        copyBtn.setTextColor(Theme.ACCENT);
+        copyBtn.setTextSize(12);
+        copyBtn.setOnClickListener(v -> copyDebugToClipboard());
+        header.addView(copyBtn);
+
+        Button closeBtn = new Button(context);
+        closeBtn.setText("X");
+        closeBtn.setTextColor(Theme.TEXT_DIM);
+        closeBtn.setTextSize(14);
+        closeBtn.setOnClickListener(v -> toggleDebug());
+        header.addView(closeBtn);
+
+        debugPanel.addView(header);
+
+        debugScroll = new ScrollView(context);
+        debugScroll.setFillViewport(true);
+
+        debugLog = new TextView(context);
+        debugLog.setTextColor(Color.parseColor("#00FF00"));
+        debugLog.setTextSize(10);
+        debugLog.setTypeface(Typeface.MONOSPACE);
+        debugLog.setPadding((int) ui.dp(8), (int) ui.dp(4), (int) ui.dp(8), (int) ui.dp(4));
+        debugLog.setText("Debug log ready.\n");
+        debugScroll.addView(debugLog);
+
+        debugPanel.addView(debugScroll, new LinearLayout.LayoutParams(MATCH_PARENT, (int) ui.dp(200)));
+
+        root.addView(debugPanel, new FrameLayout.LayoutParams(
+            MATCH_PARENT, (int) ui.dp(220), Gravity.BOTTOM | Gravity.START));
+    }
+
+    private void log(String msg) {
+        mainHandler.post(() -> {
+            String line = "[" + java.text.SimpleDateFormat.getTimeInstance().format(new java.util.Date()) + "] " + msg;
+            logLines.add(line);
+            if (logLines.size() > 200) logLines.remove(0);
+            if (debugLog != null) {
+                debugLog.setText(TextUtils.join("\n", logLines));
+                debugScroll.post(() -> debugScroll.fullScroll(View.FOCUS_DOWN));
+            }
+        });
+    }
+
+    private void toggleDebug() {
+        debugVisible = !debugVisible;
+        if (debugPanel != null) {
+            debugPanel.setVisibility(debugVisible ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void copyDebugToClipboard() {
+        ClipboardManager cm = (ClipboardManager) getContext.getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm != null) {
+            cm.setPrimaryClip(ClipData.newPlainText("r3d_debug_log", TextUtils.join("\n", logLines)));
+            log("Copied debug log to clipboard.");
+        }
+    }
+
+    // ---------------- Error overlay ----------------
+    private void buildErrorOverlay(Context context) {
+        errorOverlay = new FrameLayout(context);
+        errorOverlay.setVisibility(View.GONE);
+
+        LinearLayout container = new LinearLayout(context);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setGravity(Gravity.CENTER);
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.parseColor("#2A0000"));
+        bg.setCornerRadius((float) Theme.PANEL_RADIUS);
+        bg.setStroke((int) Theme.PANEL_STROKE, Color.parseColor("#660000"));
+        container.setBackground(bg);
+        container.setPadding((int) ui.dp(20), (int) ui.dp(20), (int) ui.dp(20), (int) ui.dp(20));
+
+        TextView errTitle = ui.text("INIT ERROR", Theme.TEXT_TITLE, Color.parseColor("#FF6666"), ui.bold);
+        errTitle.setGravity(Gravity.CENTER);
+        container.addView(errTitle);
+
+        TextView errMsg = new TextView(context);
+        errMsg.setTextColor(Theme.TEXT);
+        errMsg.setTextSize(12);
+        errMsg.setGravity(Gravity.CENTER);
+        errMsg.setText("Native library failed to initialize. See debug log for details.");
+        container.addView(errMsg, new LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT));
+
+        Button copyErr = new Button(context);
+        copyErr.setText("Copy Log");
+        copyErr.setTextColor(Theme.ACCENT);
+        copyErr.setOnClickListener(v -> copyDebugToClipboard());
+        container.addView(copyErr, new LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT));
+
+        errorOverlay.addView(container, new FrameLayout.LayoutParams(
+            (int) ui.dp(280), (int) ui.dp(200), Gravity.CENTER));
+        root.addView(errorOverlay, new FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT));
+    }
+
+    private void showError(String msg) {
+        mainHandler.post(() -> {
+            log("ERROR: " + msg);
+            if (errorOverlay != null) errorOverlay.setVisibility(View.VISIBLE);
+        });
+    }
+
+    // ---------------- Loading overlay ----------------
+    private void buildLoadingOverlay(Context context) {
+        loadingOverlay = new FrameLayout(context);
+        loadingOverlay.setVisibility(View.VISIBLE);
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.parseColor("#0A0A0A"));
+        loadingOverlay.setBackground(bg);
+
+        LinearLayout container = new LinearLayout(context);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setGravity(Gravity.CENTER);
+
+        TextView loadText = ui.text("Loading R3DNETWORK Mod Menu…", Theme.TEXT_TITLE, Theme.TEXT, ui.bold);
+        container.addView(loadText);
+
+        loadingOverlay.addView(container, new FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT));
+        root.addView(loadingOverlay, new FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT));
+    }
+
+    private void hideLoading() {
+        mainHandler.post(() -> {
+            if (loadingOverlay != null) loadingOverlay.setVisibility(View.GONE);
+        });
     }
 
     private View buildHeader(Context context) {
@@ -569,7 +750,18 @@ public class Menu extends BaseMenu implements Ui.Host {
                     case MotionEvent.ACTION_UP:
                         view.animate().scaleX(1f).scaleY(1f).setDuration(90).start();
                         if (moved) keepBubbleOnScreen();
-                        else expand();
+                        else {
+                            debugTapCount++;
+                            debugTapHandler.removeCallbacksAndMessages(null);
+                            debugTapHandler.postDelayed(() -> debugTapCount = 0, 500);
+                            if (debugTapCount >= 3) {
+                                debugTapCount = 0;
+                                debugTapHandler.removeCallbacksAndMessages(null);
+                                toggleDebug();
+                            } else {
+                                expand();
+                            }
+                        }
                         return true;
                     case MotionEvent.ACTION_CANCEL:
                         view.animate().scaleX(1f).scaleY(1f).setDuration(90).start();
