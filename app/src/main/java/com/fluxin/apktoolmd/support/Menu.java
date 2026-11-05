@@ -47,6 +47,7 @@ import com.fluxin.apktoolmd.support.components.ITextView;
 import com.fluxin.apktoolmd.support.components.IButton;
 import com.fluxin.apktoolmd.support.components.IButtonLink;
 import com.fluxin.apktoolmd.support.components.IconView;
+import com.fluxin.apktoolmd.support.components.MarkView;
 import com.fluxin.apktoolmd.support.components.StatusView;
 import com.fluxin.apktoolmd.support.components.Theme;
 import com.fluxin.apktoolmd.support.components.Ui;
