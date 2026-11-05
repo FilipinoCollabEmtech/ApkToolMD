@@ -265,7 +265,12 @@ public class Menu extends BaseMenu implements Ui.Host {
         java.util.List<FeatureEntity> loose = new java.util.ArrayList<>();
         for (FeatureEntity item : features) {
             if ("ITab".equals(item.type)) {
-                tabs.add(tab(item.name, item.icon, item.children, false));
+                Tab t = new Tab();
+        t.name = item.name;
+        t.icon = item.icon;
+        t.items = item.children;
+        t.settings = false;
+        tabs.add(t);
             } else {
                 loose.add(item);
             }
