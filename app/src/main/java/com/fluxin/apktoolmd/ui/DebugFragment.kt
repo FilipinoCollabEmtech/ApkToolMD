@@ -110,7 +110,7 @@ class DebugFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        DebugLog.app("ApkToolMD-debug", "onResume() toggle.isChecked=${toggle.isChecked} canOverlay=$canOverlay() running=${DebugOverlayService.running}")
+        DebugLog.app("ApkToolMD-debug", "onResume() toggle.isChecked=${toggle.isChecked} canOverlay=${canOverlay()} running=${DebugOverlayService.running}")
         if (toggle.isChecked && canOverlay() && !DebugOverlayService.running) {
             startService()
         } else {
@@ -156,7 +156,7 @@ class DebugFragment : Fragment() {
 
     private fun enableLogger() {
         val ctx = requireContext()
-        DebugLog.app("ApkToolMD-debug", "enableLogger() called, canOverlay=$canOverlay()")
+        DebugLog.app("ApkToolMD-debug", "enableLogger() called, canOverlay=${canOverlay()}")
         if (!canOverlay()) {
             statusView.text = getString(R.string.debug_need_permission)
             showSnack(view, getString(R.string.debug_need_permission))
