@@ -265,7 +265,7 @@ public class Menu extends BaseMenu implements Ui.Host {
         java.util.List<FeatureEntity> loose = new java.util.ArrayList<>();
         for (FeatureEntity item : features) {
             if ("ITab".equals(item.type)) {
-                tabs.add(tab(item.name, item.icon, item.children != null ? item.children : new java.util.ArrayList<FeatureEntity>(), false));
+                tabs.add(tab(item.name, item.icon, item.children, false));
             } else {
                 loose.add(item);
             }
@@ -297,7 +297,7 @@ public class Menu extends BaseMenu implements Ui.Host {
         tab.iconView = ui.icon(tab.icon, 22, Theme.TEXT_DIM);
         item.addView(tab.iconView);
 
-        tab.label = ui.text(Ui.html(tab.name), Theme.TEXT_TAB, Theme.TEXT_DIM, ui.regular);
+        tab.label = ui.text(Ui.html(tab.name), Theme.TEXT, Theme.TEXT_DIM, ui.regular);
         tab.label.setGravity(Gravity.CENTER);
         tab.label.setMaxLines(2);
         tab.label.setEllipsize(TextUtils.TruncateAt.END);

@@ -10,6 +10,7 @@ public class Theme {
     public static int ACCENT = Color.parseColor("#00FF66");
     public static int TEXT = Color.parseColor("#FFFFFF");
     public static int TEXT_DIM = Color.parseColor("#888888");
+    public static int TEXT_TAB = Color.parseColor("#888888");
     public static int TEXT_TITLE = Color.parseColor("#FFFFFF");
     public static int TEXT_BODY = Color.parseColor("#CCCCCC");
     public static float HEADER_HEIGHT = 52f;
