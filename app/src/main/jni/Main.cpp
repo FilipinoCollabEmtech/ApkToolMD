@@ -9,7 +9,6 @@
 #include <fstream>
 #include <iostream>
 #include <dlfcn.h>
-#include <numbers>
 
 #include "Includes/Logger.h"
 #include "Includes/obfuscate.h"
