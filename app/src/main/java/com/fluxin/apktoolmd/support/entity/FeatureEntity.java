@@ -5,6 +5,7 @@ import java.util.List;
 public class FeatureEntity {
     public String type = "";
     public String name = "";
+    public String icon = "grid";
     public String desc = "";
     public String url = "";
     public int id = -1;
