@@ -20,6 +20,8 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.content.ClipboardManager
+import android.content.Context
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -73,6 +75,10 @@ class DebugOverlayService : Service() {
     private val espHandler = Handler(Looper.getMainLooper())
     private lateinit var console: TextView
     private lateinit var consoleScroll: ScrollView
+
+    // ---------------- Loading / error overlays ----------------
+    private var loadingOverlay: FrameLayout? = null
+    private var errorOverlay: FrameLayout? = null
 
     private var panelShowing = false
     private var autoScroll = true
@@ -178,15 +184,20 @@ class DebugOverlayService : Service() {
 
         handler.postDelayed(modLogRunnable, 1000)
 
+        buildLoadingOverlay()
+
         try {
             addBlob()
             addEspPanel()
             addEspOverlay()
             buildPanel()
             running = true
+            hideLoading()
             DebugLog.app("ApkToolMD", "debug overlay attached (service running)")
         } catch (e: Throwable) {
             DebugLog.app("ApkToolMD", "overlay attach failed: $e")
+            hideLoading()
+            showError("Debug overlay failed to start: ${e.message}")
             stopSelf()
         }
     }
@@ -565,6 +576,11 @@ class DebugOverlayService : Service() {
             DebugLog.app("ApkToolMD", "mod log = $showModLog")
         })
         consoleButtons.addView(panelButton(getString(R.string.debug_hide)) { togglePanel() })
+        consoleButtons.addView(panelButton("Copy Log") {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("debug_log", console.text.toString()))
+            DebugLog.app("ApkToolMD", "debug log copied to clipboard")
+        })
 
         val consoleContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -829,6 +845,93 @@ class DebugOverlayService : Service() {
                 v.invalidate()
             }
         } catch (_: Throwable) {
+        }
+    }
+
+    private fun buildLoadingOverlay() {
+        loadingOverlay = FrameLayout(this).apply {
+            background = android.graphics.drawable.ColorDrawable(Color.parseColor("#0A0A0A"))
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        val tv = TextView(this).apply {
+            text = "ApkToolMD Debug\nLoading overlay…"
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+        }
+        container.addView(tv)
+        loadingOverlay!!.addView(container, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        try {
+            windowManager.addView(loadingOverlay, WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                overlayType(),
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                PixelFormat.TRANSLUCENT
+            ).apply { gravity = Gravity.TOP or Gravity.START })
+        } catch (_: Throwable) {}
+    }
+
+    private fun hideLoading() {
+        handler.post {
+            try {
+                loadingOverlay?.let { windowManager.removeView(it) }
+            } catch (_: Throwable) {}
+            loadingOverlay = null
+        }
+    }
+
+    private fun showError(message: String) {
+        handler.post {
+            errorOverlay = FrameLayout(this).apply {
+                background = android.graphics.drawable.ColorDrawable(Color.parseColor("#2A0000"))
+            }
+            val container = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(20), dp(20), dp(20), dp(20))
+            }
+            val title = TextView(this).apply {
+                text = "DEBUG OVERLAY ERROR"
+                setTextColor(Color.parseColor("#FF6666"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+            }
+            container.addView(title)
+            val msg = TextView(this).apply {
+                text = message
+                setTextColor(Color.WHITE)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                gravity = Gravity.CENTER
+            }
+            container.addView(msg)
+            val copyBtn = Button(this).apply {
+                text = "Copy Log"
+                setTextColor(Color.parseColor("#00FF66"))
+                setOnClickListener {
+                    val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("debug_log", message))
+                }
+            }
+            container.addView(copyBtn)
+            errorOverlay!!.addView(container, FrameLayout.LayoutParams(dp(300), dp(200), Gravity.CENTER))
+            try {
+                windowManager.addView(errorOverlay, WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    overlayType(),
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    PixelFormat.TRANSLUCENT
+                ).apply { gravity = Gravity.TOP or Gravity.START })
+            } catch (_: Throwable) {}
         }
     }
 
