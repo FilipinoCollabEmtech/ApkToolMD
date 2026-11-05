@@ -90,7 +90,6 @@ jint JNI_OnLoad(JavaVM *vm, void *reserved) {
         return JNI_ERR;
     }
 
-    RemapTools::RemapLibrary(OBFUSCATE("libGameHelper.so"));
     remapLoaded = true;
 
     return JNI_VERSION_1_6;

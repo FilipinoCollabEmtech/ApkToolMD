@@ -8,9 +8,11 @@
 
 // Forward declare Widget system (defined in the menu framework)
 struct Widget {
-    static void Clear();
-    static void Add(const char *tabName, const char *tabIcon, const char *childrenJson);
-    static std::string ToJsonString();
+    static void Clear() {}
+    static void Add(const char *tabName, const char *tabIcon, const char *childrenJson) {
+        (void)tabName; (void)tabIcon; (void)childrenJson;
+    }
+    static std::string ToJsonString() { return "[]"; }
 };
 
 void FeatureModule::OnDraw(JNIEnv *env, jclass clazz, jobject draw_view, jobject canvas) {

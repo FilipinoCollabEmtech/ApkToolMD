@@ -7,7 +7,6 @@
 #include "Includes/obfuscate.h"
 #include "Includes/Logger.h"
 #include "Includes/Utils.hpp"
-#include "Includes/Fonts/Pixellari.h"
 #include "FeatureModule.hpp"
 #include "JNILoader.hpp"
 
@@ -40,6 +39,11 @@ int JNILoader::RegisterPreferences(JNIEnv *env) {
 
     LOGI(OBFUSCATE("Preferences registered"));
     return JNI_OK;
+}
+
+jbyteArray JNILoader::LoadFontData(JNIEnv *env, jobject thiz, jobject ctx) {
+    (void)env; (void)thiz; (void)ctx;
+    return env->NewByteArray(0);
 }
 
 int JNILoader::RegisterBaseMenu(JNIEnv *env) {

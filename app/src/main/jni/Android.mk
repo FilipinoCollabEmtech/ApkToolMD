@@ -30,7 +30,6 @@ LOCAL_SRC_FILES := $(LOCAL_PATH)/Main.cpp \
 	$(LOCAL_PATH)/Includes/Utils.cpp \
 	$(LOCAL_PATH)/Includes/Draw.cpp \
 	$(LOCAL_PATH)/Includes/ObscuredTypes.cpp \
-	$(LOCAL_PATH)/Includes/ESPManager.cpp \
 	$(LOCAL_PATH)/Includes/RemapTools.cpp \
 	$(LOCAL_PATH)/Menu/JNILoader.cpp \
 	$(LOCAL_PATH)/Menu/FeatureModule.cpp \
