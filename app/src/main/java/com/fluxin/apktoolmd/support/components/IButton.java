@@ -15,7 +15,7 @@ public class IButton {
     public IButton(Ui ui) { this.ui = ui; }
 
     public View build(final FeatureEntity item) {
-        Context ctx = ui.context;
+        Context ctx = ui.getContext();
         Button btn = new Button(ctx);
         btn.setText(item.name);
         btn.setTextColor(Theme.TEXT);

@@ -15,7 +15,7 @@ public class IButtonLink {
     public IButtonLink(Ui ui) { this.ui = ui; }
 
     public View build(final FeatureEntity item) {
-        Context ctx = ui.context;
+        Context ctx = ui.getContext();
         Button btn = new Button(ctx);
         btn.setText(item.name);
         btn.setTextColor(Theme.ACCENT);

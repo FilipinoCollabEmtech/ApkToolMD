@@ -13,7 +13,7 @@ public class ITextView {
     public ITextView(Ui ui) { this.ui = ui; }
 
     public View build(final FeatureEntity item) {
-        Context ctx = ui.context;
+        Context ctx = ui.getContext();
         TextView tv = new TextView(ctx);
         tv.setText(item.name);
         tv.setTextColor(Theme.TEXT);

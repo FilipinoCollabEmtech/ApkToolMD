@@ -16,7 +16,7 @@ public class IInputText {
     public IInputText(Ui ui) { this.ui = ui; }
 
     public View build(final FeatureEntity item) {
-        Context ctx = ui.context;
+        Context ctx = ui.getContext();
         LinearLayout row = new LinearLayout(ctx);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);

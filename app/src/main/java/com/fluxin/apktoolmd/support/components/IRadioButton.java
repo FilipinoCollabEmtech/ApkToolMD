@@ -9,6 +9,7 @@ import android.widget.RadioGroup;
 import android.widget.TextView;
 
 import com.fluxin.apktoolmd.support.FeatureEntity;
+import com.fluxin.apktoolmd.support.Preferences;
 
 public class IRadioButton {
     private Ui ui;
@@ -16,7 +17,7 @@ public class IRadioButton {
     public IRadioButton(Ui ui) { this.ui = ui; }
 
     public View build(final FeatureEntity item) {
-        Context ctx = ui.context;
+        Context ctx = ui.getContext();
         LinearLayout row = new LinearLayout(ctx);
         row.setOrientation(LinearLayout.VERTICAL);
 

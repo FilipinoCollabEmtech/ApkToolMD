@@ -6,6 +6,8 @@ import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.fluxin.apktoolmd.support.entity.FeatureEntity;
+
 public class FeatureParser {
 
     public static List<FeatureEntity> parse(String json) {

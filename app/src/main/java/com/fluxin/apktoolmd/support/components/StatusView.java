@@ -5,7 +5,7 @@ import android.widget.TextView;
 
 public class StatusView extends TextView {
     public StatusView(Ui ui) {
-        super(ui.context);
+        super(ui.getContext());
         setText("R3D");
         setTextSize(12);
         setTextColor(Theme.TEXT_DIM);

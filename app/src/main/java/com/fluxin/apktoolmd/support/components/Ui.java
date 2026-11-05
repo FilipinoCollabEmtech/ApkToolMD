@@ -27,6 +27,10 @@ public class Ui {
         this.host = host;
     }
 
+    public Context getContext() {
+        return context;
+    }
+
     public float dp(float value) {
         return value * context.getResources().getDisplayMetrics().density;
     }

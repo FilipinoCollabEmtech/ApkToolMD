@@ -10,10 +10,9 @@ import android.widget.TextView;
 import com.fluxin.apktoolmd.support.FeatureEntity;
 
 public class IInputInt {
-    private Ui ui;
     private IInputText iInputText;
 
-    public IInputInt(IInputText iInputText) { this.iInputText = iInputText; this.ui = iInputText.ui; }
+    public IInputInt(IInputText iInputText) { this.iInputText = iInputText; }
 
     public View build(final FeatureEntity item) {
         return iInputText.build(item);

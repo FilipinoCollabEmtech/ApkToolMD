@@ -13,7 +13,7 @@ public class ICategory {
     public ICategory(Ui ui) { this.ui = ui; }
 
     public View build(String name) {
-        Context ctx = ui.context;
+        Context ctx = ui.getContext();
         TextView tv = new TextView(ctx);
         tv.setText(name);
         tv.setTextColor(Theme.TEXT_DIM);

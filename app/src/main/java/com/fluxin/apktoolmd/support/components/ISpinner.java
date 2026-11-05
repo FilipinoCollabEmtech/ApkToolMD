@@ -1,6 +1,7 @@
 package com.fluxin.apktoolmd.support.components;
 
 import android.content.Context;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
@@ -9,6 +10,7 @@ import android.widget.Spinner;
 import android.widget.TextView;
 
 import com.fluxin.apktoolmd.support.FeatureEntity;
+import com.fluxin.apktoolmd.support.Preferences;
 
 public class ISpinner {
     private Ui ui;
@@ -16,7 +18,7 @@ public class ISpinner {
     public ISpinner(Ui ui) { this.ui = ui; }
 
     public View build(final FeatureEntity item) {
-        Context ctx = ui.context;
+        Context ctx = ui.getContext();
         LinearLayout row = new LinearLayout(ctx);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
