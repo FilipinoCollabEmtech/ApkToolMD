@@ -8,6 +8,7 @@ import android.widget.Button;
 import android.widget.TextView;
 
 import com.fluxin.apktoolmd.support.entity.FeatureEntity;
+import com.fluxin.apktoolmd.support.Preferences;
 
 public class IButtonLink {
     private Ui ui;

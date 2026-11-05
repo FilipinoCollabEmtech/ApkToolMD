@@ -206,7 +206,7 @@ public class Menu extends BaseMenu implements Ui.Host {
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding((int) ui.dp(18), (int) ui.dp(4), (int) ui.dp(18), 0);
 
-        View mark = new MarkView(getContext());
+        View mark = new MarkView(getContext);
         header.addView(mark, new LinearLayout.LayoutParams((int) ui.dp(7), (int) ui.dp(15)));
 
         titleText = ui.text("", Theme.TEXT_TITLE, Theme.TEXT, Typeface.create(ui.bold, Typeface.BOLD_ITALIC));
@@ -332,7 +332,7 @@ public class Menu extends BaseMenu implements Ui.Host {
         render(1);
     }
 
-    private void closePage() {
+    public void closePage() {
         endEdit();
         if (pages.isEmpty()) return;
         pages.pop();
