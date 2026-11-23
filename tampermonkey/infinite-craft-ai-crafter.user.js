@@ -165,10 +165,154 @@
     planContext: null,
     lastCraft: null,
     dragTouch: false,
-    userToggledCollapse: false
+    userToggledCollapse: false,
+    session: null
   };
 
+  const SCRIPT_VERSION = '1.0.0';
+  const MAX_SESSION_EVENTS = 2000;
+  const SENSITIVE_FIELD_NAMES = new Set([
+    'key', 'apikey', 'api_key', 'token', 'accesstoken', 'access_token',
+    'refreshtoken', 'refresh_token', 'authorization', 'auth', 'secret',
+    'password', 'credential', 'credentials', 'bearer'
+  ]);
+
   let kb = loadKB();
+
+  function newSession(rawTarget, canonical) {
+    return {
+      startedAt: new Date().toISOString(),
+      endedAt: null,
+      target: rawTarget,
+      canonical: canonical,
+      model: state.model || '',
+      mode: state.dragMode ? 'drag' : 'instant',
+      status: 'running',
+      events: []
+    };
+  }
+
+  function completeRun(reason, attemptNumber) {
+    if (!state.session) return;
+    state.session.status = 'complete';
+    recordEvent('run_complete', { reason: reason, attempt: attemptNumber });
+  }
+
+  function isSensitiveField(name) {
+    const normalized = String(name).toLowerCase().replace(/[\s_-]+/g, '_').replace(/^_+|_+$/g, '');
+    return SENSITIVE_FIELD_NAMES.has(normalized);
+  }
+
+  // Credential-shaped field names are dropped at every depth, and string values are
+  // scrubbed of token markers reflected from gateway errors. This reduces but cannot
+  // absolutely guarantee removal from arbitrary third-party error text.
+  function sanitizeEventData(value) {
+    if (typeof value === 'string') {
+      return value
+        .replace(/\bBearer\s+\S+/gi, '[redacted]')
+        .replace(/\b(?:key|api[_-]?key|token|access[_-]?token|refresh[_-]?token|authorization|auth|secret|password|credential|credentials|bearer)\s*[:=]\s*\S+/gi, '[redacted]')
+        .replace(/\b(?:sk|pk|gsk|ghp|gho|xox[baprs])-[A-Za-z0-9_-]{8,}/gi, '[redacted]');
+    }
+    if (Array.isArray(value)) return value.map(sanitizeEventData);
+    if (value && typeof value === 'object') {
+      const copy = {};
+      for (const name of Object.keys(value)) {
+        if (isSensitiveField(name)) continue;
+        copy[name] = sanitizeEventData(value[name]);
+      }
+      return copy;
+    }
+    return value;
+  }
+
+  function recordEvent(type, data) {
+    const session = state.session;
+    if (!session) return;
+    const event = { at: new Date().toISOString(), type: type };
+    if (data && typeof data === 'object') {
+      Object.assign(event, sanitizeEventData(data));
+    }
+    session.events.push(event);
+    if (session.events.length > MAX_SESSION_EVENTS) {
+      session.events.splice(0, session.events.length - MAX_SESSION_EVENTS);
+    }
+  }
+
+  function buildRunExport(session) {
+    const events = session.events.slice();
+    const summary = {
+      attempts: 0,
+      crafts: 0,
+      newDiscoveries: 0,
+      knownResults: 0,
+      noResults: 0,
+      failures: 0,
+      refutations: 0,
+      rePlans: 0,
+      aiRequests: 0,
+      acceptedResponses: 0,
+      finalLadder: kb.plan.ladder.slice(),
+      activeStep: kb.plan.ladder[kb.plan.activeIndex] || ''
+    };
+    for (const event of events) {
+      if (event.type === 'attempt') summary.attempts++;
+      else if (event.type === 'craft') {
+        summary.crafts++;
+        if (event.infraFailure) summary.failures++;
+        else if (event.isNew) summary.newDiscoveries++;
+        else if (event.result) summary.knownResults++;
+        else summary.noResults++;
+      } else if (event.type === 'ai_request') summary.aiRequests++;
+      else if (event.type === 'ai_response') summary.acceptedResponses++;
+      else if (event.type === 'refutation') summary.refutations++;
+      else if (event.type === 'plan_clear') summary.rePlans++;
+    }
+    return {
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      scriptVersion: SCRIPT_VERSION,
+      run: {
+        startedAt: session.startedAt,
+        endedAt: session.endedAt,
+        target: session.target,
+        canonical: session.canonical,
+        model: session.model,
+        mode: session.mode,
+        status: session.status
+      },
+      summary: summary,
+      events: events,
+      notes: 'Current run only (since Start). AI "produces" values are hypotheses, not verified products.'
+    };
+  }
+
+  function exportRunJson() {
+    const session = state.session;
+    if (!session) {
+      log('No run to export yet — press Start first.', 'error');
+      return;
+    }
+    try {
+      const text = JSON.stringify(buildRunExport(session), null, 2);
+      const blob = new Blob([text], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const stamp = now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + '-' +
+        pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
+      anchor.href = url;
+      anchor.download = 'infinite-craft-run-' + stamp + '.json';
+      anchor.style.display = 'none';
+      (document.body || document.documentElement).appendChild(anchor);
+      anchor.click();
+      anchor.parentNode.removeChild(anchor);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      log('Exported run JSON (' + session.events.length + ' events).', 'success');
+    } catch (e) {
+      log('Export failed: ' + e.message, 'error');
+    }
+  }
 
   // Stop must interrupt a sleeping delay immediately, so sleeps register a
   // wake callback that Stop fires. A plain setTimeout would ignore Stop for
@@ -529,6 +673,7 @@
     els.target = el('input', { id: 'icai-target', type: 'text', placeholder: 'Target element (e.g. Dragon)' });
     els.start = el('button', { id: 'icai-start', text: 'Start' });
     els.stop = el('button', { id: 'icai-stop', text: 'Stop' });
+    els.export = el('button', { id: 'icai-export', text: 'Export run JSON' });
     els.status = el('div', { id: 'icai-status', text: 'Idle' });
     els.attempts = el('span', { id: 'icai-attempts', text: '0' });
     els.discoveries = el('span', { id: 'icai-discoveries', text: '0' });
@@ -571,6 +716,7 @@
       el('label', { text: 'Target element' }),
       els.target,
       el('div', { cls: 'icai-row' }, [els.start, els.stop]),
+      el('div', { cls: 'icai-row' }, [els.export]),
       els.status,
       counters,
       el('label', { text: 'Kilo API key (stored in Tampermonkey, never logged)' }),
@@ -717,6 +863,8 @@
     });
 
     els.stop.disabled = true;
+    els.export.addEventListener('click', exportRunJson);
+    els.export.disabled = !state.session;
   }
 
   function log(message, level = 'info') {
@@ -750,6 +898,7 @@
     els.stop.disabled = !on;
     els.drag.disabled = on;
     els.dragDuration.disabled = on;
+    els.export.disabled = !state.session;
   }
 
   function setCollapsed(collapsed) {
@@ -854,6 +1003,9 @@
   }
 
   function clearPlan(reason) {
+    if (kb.plan.ladder.length > 0) {
+      recordEvent('plan_clear', { reason: reason, ladder: kb.plan.ladder.slice() });
+    }
     kb.plan.ladder = [];
     kb.plan.activeIndex = 0;
     kb.plan.mode = 'fresh';
@@ -889,6 +1041,7 @@
     if (last && last.result && active && last.result.toLowerCase() === active.toLowerCase()) {
       const next = firstNeedIndex(plan.ladder);
       plan.activeIndex = next;
+      recordEvent('plan_advance', { activeIndex: next, step: plan.ladder[next] || '' });
       log('Plan advanced to step ' + next + ': ' + (plan.ladder[next] || '(complete)'), 'success');
       saveKB();
       return;
@@ -898,6 +1051,9 @@
         plan.refutedRecipes.push({ a: last.a, b: last.b, result: last.result });
         plan.refutedRecipes = plan.refutedRecipes.slice(-12);
       }
+      recordEvent('refutation', {
+        a: last.a, b: last.b, predicted: null, actual: last.result, sticky: true
+      });
       log('Plan: sticky result ' + last.result + ' refuted for ' + last.a + ' + ' + last.b, 'info');
     } else if (last && last.result && last.isNew === false && active &&
       last.result.toLowerCase() !== active.toLowerCase() &&
@@ -908,6 +1064,9 @@
         plan.refutedSteps.push(active);
         plan.refutedSteps = plan.refutedSteps.slice(-CONFIG.maxRefutedSteps);
       }
+      recordEvent('refutation', {
+        a: last.a, b: last.b, predicted: active, actual: last.result, sticky: false
+      });
       log('Plan: step "' + active + '" refuted by result ' + last.result, 'error');
     }
     saveKB();
@@ -1228,6 +1387,7 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
         },
         ontimeout: () => {
           if (state.activeRequest === request) state.activeRequest = null;
+          recordEvent('http_anomaly', { level: 'error', status: 0, message: 'gateway request timed out' });
           reject(new KiloError('Gateway request timed out', 0, true));
         },
         onabort: () => {
@@ -1279,6 +1439,7 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
           if (e instanceof StopSignal) throw e;
           if (e.retryable && transientRetries < maxTransientRetries) {
             transientRetries++;
+            recordEvent('http_anomaly', { level: 'error', status: 0, message: 'transport error: ' + e.message });
             log('Gateway transport error (' + e.message + '); retrying.', 'error');
             await jitterSleep(800 * transientRetries);
             continue;
@@ -1294,6 +1455,9 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
               throw new StopSignal('Repeated HTTP 429 rate limits. Stopping.', 'error');
             }
             const wait = Math.min(1000 * Math.pow(2, state.rateLimitHits - 1), 20000);
+            recordEvent('http_anomaly', {
+              level: 'error', status: 429, message: 'HTTP 429, backing off ' + wait + ' ms'
+            });
             log('HTTP 429 (' + detail + '). Backing off ' + wait + ' ms [' + state.rateLimitHits + '/5].', 'error');
             await jitterSleep(wait, false);
             continue;
@@ -1303,6 +1467,9 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
           }
           if (response.status >= 500 && transientRetries < maxTransientRetries) {
             transientRetries++;
+            recordEvent('http_anomaly', {
+              level: 'error', status: response.status, message: 'gateway error, retrying'
+            });
             log('Gateway ' + response.status + ' (' + detail + '); retrying.', 'error');
             await jitterSleep(1000 * transientRetries);
             continue;
@@ -1339,6 +1506,12 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
       throw new KiloError('HTTP ' + first.status + ': ' + first.detail, first.status, false);
     }
 
+    recordEvent('fallback', {
+      reason: mandatoryReasoning ? 'reasoning is mandatory' : 'reasoning budget truncated content',
+      model: state.model,
+      maxTokens: CONFIG.fallbackMaxTokens,
+      timeoutMs: CONFIG.fallbackTimeoutMs
+    });
     log('Reasoning blocked the answer; retrying ' + state.model + ' at ' + CONFIG.fallbackMaxTokens +
       ' tokens with a ' + CONFIG.fallbackTimeoutMs + ' ms timeout.', 'info');
     const fallbackBody = {
@@ -1478,6 +1651,7 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
   async function askForProposals(messages) {
     for (let attempt = 1; attempt <= 2; attempt++) {
       assertRunning();
+      recordEvent('ai_request', { attempt: attempt, model: state.model });
       let content;
       try {
         content = await callKilo(messages);
@@ -1499,6 +1673,25 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
         // A committed fresh plan is the watchdog grace period; the dry spell resets.
         if (!state.planContext.continuation) state.consecutiveNoNew = 0;
         saveKB();
+        recordEvent('ai_response', {
+          strategy: batch.strategy,
+          analysis: batch.analysis,
+          subgoals: batch.subgoals,
+          ladder: batch.ladder.slice(),
+          activeIndex: batch.activeIndex,
+          received: batch.rawCount,
+          used: batch.length,
+          droppedTried: batch.droppedTried,
+          droppedInvalid: batch.droppedInvalid,
+          proposals: batch.map(p => ({
+            a: p.a, b: p.b, produces: p.produces, score: p.score, why: p.why
+          }))
+        });
+        recordEvent('plan_created', {
+          ladder: batch.ladder.slice(),
+          activeIndex: batch.activeIndex,
+          mode: kb.plan.mode
+        });
         log('AI strategy: ' + batch.strategy + (batch.analysis ? ' — ' + batch.analysis : ''), 'info');
         log('Plan ladder: ' + batch.ladder.join(' → '), 'info');
         log('Active step ' + batch.activeIndex + ': ' + batch.ladder[batch.activeIndex], 'info');
@@ -1517,6 +1710,12 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
         clearPlan(reason);
         throw new StopSignal(reason, 'error');
       }
+      recordEvent('repair', {
+        attempt: attempt,
+        reason: batch
+          ? 'mostly tried (' + batch.droppedTried + '/' + batch.rawCount + ') or abstained'
+          : 'invalid batch'
+      });
       log(batch
         ? 'Repair: ' + batch.droppedTried + '/' + batch.rawCount + ' proposals were already tried; re-prompting with the forbidden list.'
         : 'Invalid batch (1/2); re-prompting with a stricter no-repeat instruction.', 'error');
@@ -1673,10 +1872,16 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
     const beforeItems = IC.getItems();
     const beforeNames = new Set(beforeItems.map(item => item && item.text));
     const beforeLen = beforeItems.length;
+    const predicted = proposal && typeof proposal.produces === 'string' ? proposal.produces.trim() : '';
+    const executor = state.dragMode ? 'drag' : 'instant';
     let result;
     if (state.dragMode) {
       const dragOutcome = await craftViaDrag(a, b, IC);
       if (dragOutcome && dragOutcome.infraFailure) {
+        recordEvent('craft', {
+          a: a, b: b, executor: executor, infraFailure: true, reason: dragOutcome.reason,
+          predicted: predicted, correct: false
+        });
         log('Drag mode: ' + dragOutcome.reason + ' — aborting without recording the pair.', 'error');
         throw new StopSignal('Drag mode infrastructure failure. Stopping.', 'error');
       }
@@ -1696,6 +1901,10 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
       recordHypothesis(proposal, null);
       updatePatterns();
       saveKB();
+      recordEvent('craft', {
+        a: a, b: b, executor: executor, result: null, isNew: false,
+        predicted: predicted, correct: false, infraFailure: false
+      });
       log(a + ' + ' + b + ' → no result', 'fail');
       state.lastCraft = { a: a, b: b, result: null, isNew: false };
       assertRunning();
@@ -1710,6 +1919,12 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
     recordHypothesis(proposal, name);
     updatePatterns();
     saveKB();
+    recordEvent('craft', {
+      a: a, b: b, executor: executor, result: name, isNew: isNew,
+      predicted: predicted,
+      correct: !!predicted && predicted.toLowerCase() === name.toLowerCase(),
+      infraFailure: false
+    });
     log(a + ' + ' + b + ' → ' + name + (isNew ? '  ✓ NEW' : ''), isNew ? 'success' : 'info');
     state.lastCraft = { a: a, b: b, result: name, isNew: isNew };
     // The craft already executed; record it before honoring a Stop pressed mid-craft.
@@ -2100,6 +2315,11 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
   async function run(rawTarget) {
     if (state.running) return;
     const target = canonicalizeTarget(rawTarget);
+    state.session = newSession(rawTarget, target);
+    recordEvent('run_start', {
+      target: rawTarget, canonical: target,
+      mode: state.dragMode ? 'drag' : 'instant'
+    });
     state.running = true;
     state.stopped = false;
     state.rateLimitHits = 0;
@@ -2116,6 +2336,8 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
       state.IC = IC;
       syncElementsFromGame(IC);
       await resolveModel();
+      state.session.model = state.model;
+      recordEvent('model', { model: state.model });
       assertRunning();
 
       planLoop:
@@ -2123,6 +2345,7 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
         assertRunning();
 
         if (hasElement(target)) {
+          completeRun('target already discovered', attemptsThisRun);
           log('SUCCESS: "' + target + '" is discovered (attempt ' + attemptsThisRun + ').', 'success');
           setStatus('Target found');
           break;
@@ -2149,6 +2372,7 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
           assertRunning();
           if (attemptsThisRun >= CONFIG.maxAttemptsPerRun) break;
           if (hasElement(target)) {
+            completeRun('target crafted', attemptsThisRun);
             log('SUCCESS: "' + target + '" crafted (attempt ' + attemptsThisRun + ').', 'success');
             setStatus('Target found');
             break planLoop;
@@ -2160,6 +2384,7 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
           const isNew = await craftPair(proposal.a, proposal.b, IC, proposal);
           kb.attempts++;
           attemptsThisRun++;
+          recordEvent('attempt', { index: attemptsThisRun });
           executed++;
           state.consecutiveNoNew = isNew ? 0 : state.consecutiveNoNew + 1;
           applyPlanFeedback(target);
@@ -2168,6 +2393,7 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
           setStatus('Attempt ' + attemptsThisRun + ' / ' + CONFIG.maxAttemptsPerRun);
 
           if (hasElement(target)) {
+            completeRun('target crafted', attemptsThisRun);
             log('SUCCESS: "' + target + '" crafted (attempt ' + attemptsThisRun + ').', 'success');
             setStatus('Target found');
             break planLoop;
@@ -2182,17 +2408,25 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
       }
 
       if (!state.stopped && attemptsThisRun >= CONFIG.maxAttemptsPerRun && !hasElement(target)) {
+        state.session.status = 'stopped';
+        recordEvent('run_stop', { reason: 'safety stop' });
         log('Safety stop: reached ' + CONFIG.maxAttemptsPerRun + ' attempts this run.', 'error');
         setStatus('Safety stop');
       }
     } catch (e) {
       if (e instanceof StopSignal) {
+        state.session.status = 'stopped';
+        recordEvent('run_stop', { reason: e.message });
         log(e.message, e.level);
       } else {
+        state.session.status = 'error';
+        recordEvent('run_error', { reason: e && e.message ? e.message : String(e) });
         log('Run error: ' + (e && e.message ? e.message : String(e)), 'error');
         setStatus('Error');
       }
     } finally {
+      state.session.endedAt = new Date().toISOString();
+      recordEvent('run_end', { status: state.session.status });
       state.IC = null;
       state.running = false;
       state.stopped = false;

@@ -612,7 +612,42 @@ the knowledge base, so a broken drag cannot create a false ban.
 
 ---
 
-## 11. Make it yours
+## 11. Exporting the current run
+
+The **Export run JSON** button becomes available once Start has been pressed and stays
+available after Stop or a successful completion — the session is kept until the next
+Start. It downloads `infinite-craft-run-<YYYYMMDD-HHmmss>.json` via a Blob and a
+temporary anchor from the page DOM, then revokes the object URL. With no session it
+logs an error instead of writing an empty file.
+
+The payload is a single pretty-printed object with `schemaVersion: 1`, `exportedAt`,
+`scriptVersion`, a `run` block (timestamps, raw and canonical target, model, executor
+mode, status), a `summary` (attempts, crafts, new discoveries, known results, no
+results, failures, refutations, re-plans, AI requests, accepted responses, and the final
+ladder with active step), the chronological `events` array, and a short `notes` string.
+`aiRequests` counts every `ai_request` event — including repair re-prompts and failed
+batches — while `acceptedResponses` counts batches that passed validation. `attempts`
+counts only crafts that reached `IC.craft`; `crafts` also includes aborted infrastructure
+failures. `rePlans` counts cleared non-empty ladders, and `failures` counts only craft
+infrastructure failures. `recordEvent()`
+captures run lifecycle, model choice, each AI request and accepted batch (strategy,
+analysis, ladder, active index, proposal counts and the full proposal list), repairs,
+each craft (pair, executor, result, `isNew`, predicted product and whether it was
+correct, infra-failure flag), plan creation/advance/clear with reasons, refutations, and
+HTTP anomalies such as 429s, 5xx retries, timeouts, and the reasoning fallback.
+
+Events are capped at 2000 with oldest dropped. `recordEvent()` recursively drops
+credential-shaped field names at any depth and scrubs bearer tokens, `key:`/`key=value`
+fragments, and common token prefixes from string values. That reduces the chance of a
+secret surviving in reflected gateway error text but cannot guarantee it for arbitrary
+third-party messages. The key lives only in `icai.key`, the password input,
+and the Authorization header — it is never in the session or export. The human-readable
+`log()` is unchanged; this is an additional structured feed. `produces` values are AI
+hypotheses, not verified game results.
+
+---
+
+## 12. Make it yours
 
 **New target strategy.** Replace the prioritization in `pickElementNames()`.
 It currently boosts active-step and ladder matches highest, then adds target-token
