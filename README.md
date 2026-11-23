@@ -12,6 +12,6 @@ An Android APK inspector and reverse-engineering toolkit with a game-mod framewo
 
 ## Install Infinite Craft AI Crafter (Tampermonkey)
 
-**[Install Infinite Craft AI Crafter (Tampermonkey)](https://raw.githubusercontent.com/FilipinoCollabEmtech/ApkToolMD/main/tampermonkey/infinite-craft-ai-crafter.user.js)**
+**[Install Infinite Craft AI Crafter (Tampermonkey)](https://raw.githubusercontent.com/FilipinoCollabEmtech/ApkToolMD/main/tampermonkey/infinite-craft-ai-crafter_user.js)**
 
 Clicking the link opens Tampermonkey's install popup. Tampermonkey must be installed first; see [`tampermonkey/LEARN.md`](tampermonkey/LEARN.md) for the walkthrough.
