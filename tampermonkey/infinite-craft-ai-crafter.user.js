@@ -54,14 +54,18 @@
     ladderLength: 5,
     candidatePoolSize: 40,
     maxCraftsPerPlan: 8,
-    maxRefutedSteps: 12,
+    // Reachable-first selection: keep the closest known elements in play and stop
+    // when many crafts have produced nothing closer to the target.
+    topKElements: 3,
+    closenessStallLimit: 12,
+    minViableCloseness: 0.05,
     maxElementsInPrompt: 2000,
     maxRecipesInPrompt: 200,
     maxFailuresInPrompt: 100,
     maxTriedPairsInPrompt: 1000,
 
     // Higher sampling temperature breaks the deterministic same-pair loop that
-    // temperature 0 produces when the prompt barely changes between turns.
+    // temperature 0 caused the same-pair loop when the prompt barely changed.
     primaryMaxTokens: 4096,
     fallbackMaxTokens: 8192,
     temperature: 0.7,
@@ -70,7 +74,7 @@
     // new ground; the next prompt is forced into explore mode.
     consecutiveNoNewLimit: 12,
     maxGoalsStored: 8,
-    maxHypothesesStored: 20,
+    maxRecipeMemoryEntries: 20000,
     // Batch that is mostly already-tried proposals gets one repair re-prompt.
     repairDropRatio: 0.5,
 
@@ -83,6 +87,12 @@
     // override is still honored, with a warning instead of a silent substitution.
     slowModelIds: ['stealth/glyph-cluster'],
     preferredFastModel: 'nvidia/nemotron-3.5-lightning:free',
+    // Routers look fast but plan poorly; demote them for planning calls only.
+    planningModelIds: [
+      'nvidia/nemotron-3.5-lightning:free',
+      'inclusionai/ling-3.2-flash:free'
+    ],
+    honorRouterOverrideForPlanning: false,
 
     // Animated drag is opt-in. Duration is the whole visible drag, split across
     // the move steps; the panel input overrides it and persists it.
@@ -118,6 +128,82 @@
 
   const BASE_ELEMENTS = ['Water', 'Fire', 'Wind', 'Earth'];
   const TARGET_STOP_WORDS = new Set(['of', 'the', 'and', 'in', 'on']);
+
+  // Deterministic theme weights. These are planning hints, not game facts; for an
+  // unmapped target we fall back to its literal tokens. Source-attributed recipes
+  // below are editorial starting points that the game always gets to validate.
+  const TARGET_THEME_LEXICON = {
+    'doctor who': { doctor: 1, tardis: 1, alien: 0.9, ufo: 0.9, time: 0.8,
+      police: 0.8, abduction: 0.7, companion: 0.6, travel: 0.5, machine: 0.5,
+      rose: 0.4, steam: 0.3, hourglass: 0.3 },
+    'godzilla': { godzilla: 1, dragon: 0.9, monster: 0.8, bulldozer: 0.7,
+      lizard: 0.7, atomic: 0.6, radiation: 0.5, city: 0.4 },
+    'star wars': { 'star wars': 1, tatooine: 0.9, dune: 0.8, planet: 0.7,
+      jedi: 0.8, force: 0.7, space: 0.6, laser: 0.5, sand: 0.4 },
+    'goku': { goku: 1, 'dragon ball': 0.9, 'dragon ball z': 0.9, saiyan: 0.8,
+      fighting: 0.7, martial: 0.7, power: 0.6, dragon: 0.5 }
+  };
+
+  const RECIPE_MEMORY_SEED_VERSION = 2;
+
+  // Hand-written starting recipes. `expected` is a seed fact supplied by us, not a
+  // model prediction; a mismatch refutes only the seed, never a model guess.
+  const SEED_RECIPES_RAW = [
+    // Base progression (editorial).
+    { target: '*', a: 'Fire', b: 'Water', result: 'Steam', verification: 'editorial', note: 'base' },
+    { target: '*', a: 'Fire', b: 'Steam', result: 'Engine', verification: 'editorial', note: 'base' },
+    { target: '*', a: 'Earth', b: 'Water', result: 'Plant', verification: 'editorial', note: 'base' },
+    { target: '*', a: 'Plant', b: 'Water', result: 'Swamp', verification: 'editorial', note: 'base' },
+    { target: '*', a: 'Fire', b: 'Swamp', result: 'Dragon', verification: 'editorial', note: 'base' },
+    { target: '*', a: 'Earth', b: 'Earth', result: 'Mountain', verification: 'editorial', note: 'base' },
+    { target: '*', a: 'Earth', b: 'Wind', result: 'Dust', verification: 'editorial', note: 'base' },
+    { target: '*', a: 'Lava', b: 'Water', result: 'Stone', verification: 'editorial', note: 'base' },
+    { target: '*', a: 'Stone', b: 'Fire', result: 'Metal', verification: 'editorial', note: 'base' },
+    { target: '*', a: 'Metal', b: 'Fire', result: 'Iron', verification: 'editorial', note: 'base' },
+    { target: '*', a: 'Plant', b: 'Earth', result: 'Flower', verification: 'editorial', note: 'base' },
+    // Doctor Who chain (source-attributed, version-dependent).
+    { target: 'doctor who', a: 'Steam', b: 'Fire', result: 'Engine', verification: 'source-checked', note: 'DW prerequisite' },
+    { target: 'doctor who', a: 'Plant', b: 'Engine', result: 'Car', verification: 'source-checked', note: 'DW prerequisite' },
+    { target: 'doctor who', a: 'Wind', b: 'Water', result: 'Wave', verification: 'editorial', note: 'DW prerequisite' },
+    { target: 'doctor who', a: 'Wave', b: 'Earth', result: 'Sand', verification: 'editorial', note: 'DW prerequisite' },
+    { target: 'doctor who', a: 'Sand', b: 'Fire', result: 'Glass', verification: 'editorial', note: 'DW prerequisite' },
+    { target: 'doctor who', a: 'Glass', b: 'Sand', result: 'Hourglass', verification: 'source-checked', note: 'DW prerequisite' },
+    { target: 'doctor who', a: 'Hourglass', b: 'Sand', result: 'Time', verification: 'source-checked', note: 'DW prerequisite' },
+    { target: 'doctor who', a: 'Hourglass', b: 'Car', result: 'Time Machine', verification: 'inferred', note: 'DW chain' },
+    { target: 'doctor who', a: 'Iron', b: 'Flower', result: 'Rose', verification: 'inferred', note: 'DW chain' },
+    { target: 'doctor who', a: 'Rose', b: 'Time Machine', result: 'Rose Tyler', verification: 'inferred', note: 'DW chain' },
+    { target: 'doctor who', a: 'Rose Tyler', b: 'Time Machine', result: 'Doctor Who', verification: 'source-checked', note: 'DW target' },
+    // Godzilla (source-attributed).
+    { target: 'godzilla', a: 'Bulldozer', b: 'Dragon', result: 'Godzilla', verification: 'source-checked', note: 'Godzilla target' },
+    { target: 'godzilla', a: 'Dragon', b: 'City', result: 'Godzilla', verification: 'inferred', note: 'Godzilla alt' },
+    // Star Wars (source-attributed).
+    { target: 'star wars', a: 'Dune', b: 'Planet', result: 'Tatooine', verification: 'source-checked', note: 'SW chain' },
+    { target: 'star wars', a: 'Fire', b: 'Tatooine', result: 'Star Wars', verification: 'source-checked', note: 'SW target' },
+    // Goku (source-attributed).
+    { target: 'goku', a: 'Dragon Ball Z', b: 'Wind', result: 'Goku', verification: 'source-checked', note: 'Goku target' },
+    { target: 'goku', a: 'Dragon Ball', b: 'Fire', result: 'Dragon Ball Z', verification: 'inferred', note: 'Goku chain' }
+  ];
+
+  // One row per pair: global seeds and stronger verification win, so a duplicate
+  // cannot override a better-sourced version of the same combination.
+  function dedupeSeedRecipes(rows) {
+    const strength = { inferred: 0, editorial: 1, 'source-checked': 2 };
+    const byKey = new Map();
+    for (const row of rows) {
+      const key = pairKey(row.a, row.b);
+      const prior = byKey.get(key);
+      if (!prior) {
+        byKey.set(key, Object.assign({}, row));
+        continue;
+      }
+      const score = (r) => (r.target === '*' ? 10 : 0) + (strength[r.verification] || 0);
+      if (score(row) > score(prior)) byKey.set(key, Object.assign({}, row));
+    }
+    return Array.from(byKey.values());
+  }
+
+  const SEED_RECIPES = dedupeSeedRecipes(SEED_RECIPES_RAW);
+
   const GATEWAY_PATHS = {
     chat: '/chat/completions',
     models: '/models'
@@ -158,6 +244,9 @@
     autoModel: null,
     freeModelIds: null,
     model: '',
+    planningModel: '',
+    craftsSinceClosenessGain: 0,
+    bestCloseness: 0,
     activeRequest: null,
     rateLimitHits: 0,
     consecutiveNoNew: 0,
@@ -166,11 +255,16 @@
     lastCraft: null,
     dragTouch: false,
     userToggledCollapse: false,
-    session: null
+    session: null,
+    requestPurpose: 'plan',
+    lastAiResponse: null,
+    lastDragDiagnostics: null,
+    lastAnomalyRecord: null
   };
 
   const SCRIPT_VERSION = '1.0.0';
   const MAX_SESSION_EVENTS = 2000;
+  const MAX_SESSION_LOG_LINES = 5000;
   const SENSITIVE_FIELD_NAMES = new Set([
     'key', 'apikey', 'api_key', 'token', 'accesstoken', 'access_token',
     'refreshtoken', 'refresh_token', 'authorization', 'auth', 'secret',
@@ -188,7 +282,74 @@
       model: state.model || '',
       mode: state.dragMode ? 'drag' : 'instant',
       status: 'running',
-      events: []
+      startedMs: Date.now(),
+      events: [],
+      logLines: [],
+      droppedEvents: 0,
+      droppedLogLines: 0,
+      aiRequestCount: 0,
+      kbAtStart: null,
+      kbAtEnd: null
+    };
+  }
+
+  function sessionElapsedMs() {
+    const session = state.session;
+    return session ? Date.now() - session.startedMs : 0;
+  }
+
+  function kbSnapshot() {
+    return {
+      elementCount: Object.keys(kb.elements).length,
+      elementNames: Object.keys(kb.elements),
+      recipeCount: kb.recipes.length,
+      recipes: kb.recipes.slice(),
+      failureCount: kb.failures.length,
+      failures: kb.failures.slice(),
+      triedPairCount: Object.keys(kb.triedPairs).length,
+      triedPairs: Object.values(kb.triedPairs).slice(),
+      recipeMemory: Object.values(kb.recipeMemory).slice(),
+      recipeMemoryCount: Object.keys(kb.recipeMemory).length,
+      seedCount: Object.values(kb.recipeMemory).filter(e => e.source === 'seed').length,
+      observedCount: Object.values(kb.recipeMemory).filter(e => e.source === 'observed').length,
+      refutedSeeds: kb.refutedSeeds.slice(),
+      goals: kb.goals.slice(),
+      // kb.plan is mutated in place, so a live reference would make both snapshots
+      // show the final state and erase the refutation delta.
+      plan: JSON.parse(JSON.stringify(kb.plan)),
+      patterns: kb.patterns.slice(),
+      attempts: kb.attempts,
+      discoveries: kb.discoveries
+    };
+  }
+
+  function addedSince(before, after, keyFn) {
+    const seen = new Set(before.map(keyFn));
+    return after.filter(item => !seen.has(keyFn(item)));
+  }
+
+  function kbDelta(start, end) {
+    if (!start || !end) return null;
+    const keyOfRecipe = (r) => pairKey(r.a, r.b) + '|' + String(r.result);
+    const keyOfPair = (p) => pairKey(p.a, p.b);
+    const keyOfSeedRefutation = (s) => pairKey(s.a, s.b) + '|' + s.expected + '|' + s.at;
+    return {
+      newElements: addedSince(start.elementNames, end.elementNames, n => n),
+      newRecipes: addedSince(start.recipes, end.recipes, keyOfRecipe),
+      newFailures: addedSince(start.failures, end.failures, keyOfPair),
+      newTriedPairs: addedSince(start.triedPairs, end.triedPairs, keyOfPair),
+      newRefutedSeeds: addedSince(start.refutedSeeds, end.refutedSeeds, keyOfSeedRefutation),
+      newRefutedRecipes: addedSince(
+        start.plan.refutedRecipes, end.plan.refutedRecipes,
+        r => pairKey(r.a, r.b) + '|' + String(r.result)
+      ),
+      newPatterns: addedSince(start.patterns, end.patterns, s => s),
+      newMemoryEntries: addedSince(
+        start.recipeMemory, end.recipeMemory,
+        e => pairKey(e.a, e.b) + '|' + String(e.result)
+      ),
+      attemptsDelta: end.attempts - start.attempts,
+      discoveriesDelta: end.discoveries - start.discoveries
     };
   }
 
@@ -235,11 +396,56 @@
     session.events.push(event);
     if (session.events.length > MAX_SESSION_EVENTS) {
       session.events.splice(0, session.events.length - MAX_SESSION_EVENTS);
+      session.droppedEvents++;
     }
+  }
+
+  function recordAnomaly(data) {
+    recordEvent('http_anomaly', data);
+    // Hold the record itself: event-cap trimming can invalidate array indices.
+    if (state.session) {
+      state.lastAnomalyRecord = state.session.events[state.session.events.length - 1];
+    }
+  }
+
+  function lastAiRequestSnapshot() {
+    const session = state.session;
+    if (!session) return null;
+    for (let i = session.events.length - 1; i >= 0; i--) {
+      if (session.events[i].type === 'ai_request') return session.events[i];
+    }
+    return null;
+  }
+
+  function errorRecord(error, extra) {
+    const e = error || {};
+    const record = {
+      name: e.name || 'Error',
+      message: e.message || String(error),
+      stack: e.stack || '',
+      status: e.status !== undefined ? e.status : null,
+      code: e.code !== undefined ? e.code : null,
+      detail: e.detail !== undefined ? e.detail : null,
+      level: e.level || null,
+      context: {
+        target: state.session ? state.session.canonical : '',
+        activeIndex: kb.plan.activeIndex,
+        activeStep: kb.plan.ladder[kb.plan.activeIndex] || '',
+        ladder: kb.plan.ladder.slice(),
+        craftsSinceReplan: kb.plan.craftsSinceReplan,
+        consecutiveNoNew: state.consecutiveNoNew,
+        lastCraft: state.lastCraft,
+        lastAiRequest: lastAiRequestSnapshot()
+      }
+    };
+    if (extra) Object.assign(record, extra);
+    return record;
   }
 
   function buildRunExport(session) {
     const events = session.events.slice();
+    const logLines = session.logLines.slice();
+    const endSnapshot = session.kbAtEnd || kbSnapshot();
     const summary = {
       attempts: 0,
       crafts: 0,
@@ -248,9 +454,11 @@
       noResults: 0,
       failures: 0,
       refutations: 0,
+      seedRefutations: 0,
       rePlans: 0,
       aiRequests: 0,
       acceptedResponses: 0,
+      rejectedResponses: 0,
       finalLadder: kb.plan.ladder.slice(),
       activeStep: kb.plan.ladder[kb.plan.activeIndex] || ''
     };
@@ -263,12 +471,14 @@
         else if (event.result) summary.knownResults++;
         else summary.noResults++;
       } else if (event.type === 'ai_request') summary.aiRequests++;
-      else if (event.type === 'ai_response') summary.acceptedResponses++;
+      else if (event.type === 'ai_response' && event.accepted === true) summary.acceptedResponses++;
+      else if (event.type === 'ai_response' && event.accepted === false) summary.rejectedResponses++;
       else if (event.type === 'refutation') summary.refutations++;
+      else if (event.type === 'seed_refuted') summary.seedRefutations++;
       else if (event.type === 'plan_clear') summary.rePlans++;
     }
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       exportedAt: new Date().toISOString(),
       scriptVersion: SCRIPT_VERSION,
       run: {
@@ -282,7 +492,19 @@
       },
       summary: summary,
       events: events,
-      notes: 'Current run only (since Start). AI "produces" values are hypotheses, not verified products.'
+      logLines: sanitizeEventData(logLines),
+      export: {
+        truncated: session.droppedEvents > 0 || session.droppedLogLines > 0,
+        droppedEvents: session.droppedEvents,
+        droppedLogLines: session.droppedLogLines,
+        eventCap: MAX_SESSION_EVENTS,
+        logLineCap: MAX_SESSION_LOG_LINES
+      },
+      kbAtStart: sanitizeEventData(session.kbAtStart),
+      kbAtEnd: sanitizeEventData(endSnapshot),
+      kbDelta: sanitizeEventData(kbDelta(session.kbAtStart, endSnapshot)),
+      closenessContext: sanitizeEventData(session.closenessContext || null),
+      notes: 'Current run only (since Start). Model predictions are not used; seed "expected" values are hand-written facts validated by the game.'
     };
   }
 
@@ -364,9 +586,22 @@
   }
 
   function loadTriedPairs(data) {
+    const fresh = Object.create(null);
     const existing = data.triedPairs;
-    const fresh = (existing && typeof existing === 'object' && !Array.isArray(existing)) ? existing : {};
-    if (existing === fresh) return fresh;
+    if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+      for (const key of Object.keys(existing)) {
+        const p = existing[key];
+        if (!p || !safeMapKey(key, p.a, p.b)) continue;
+        fresh[key] = {
+          a: p.a, b: p.b,
+          result: typeof p.result === 'string' ? p.result : '',
+          isNew: !!p.isNew,
+          misses: Number(p.misses) || 0,
+          at: Number(p.at) || 0
+        };
+      }
+      return fresh;
+    }
 
     // Pre-dedup knowledge bases have no triedPairs; reconstruct from history so
     // old recipes are not immediately re-proposed and burned again.
@@ -392,6 +627,90 @@
     return fresh;
   }
 
+  function trimRecipeMemory(memory) {
+    const size = Object.keys(memory).length;
+    if (size <= CONFIG.maxRecipeMemoryEntries) return;
+    const removable = Object.keys(memory)
+      .filter(k => memory[k].source !== 'seed')
+      .sort((x, y) => (memory[x].updatedAt || 0) - (memory[y].updatedAt || 0));
+    const drop = Math.min(removable.length, size - CONFIG.maxRecipeMemoryEntries);
+    for (let i = 0; i < drop; i++) delete memory[removable[i]];
+  }
+
+  function safeMapKey(key, a, b) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') return false;
+    if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false;
+    return key === pairKey(a, b);
+  }
+
+  function safeElementName(name) {
+    return typeof name === 'string' && !!name.length &&
+      name !== '__proto__' && name !== 'constructor' && name !== 'prototype';
+  }
+
+  function loadRecipeMemory(data) {
+    const stored = (data && data.recipeMemory && typeof data.recipeMemory === 'object' &&
+      !Array.isArray(data.recipeMemory)) ? data.recipeMemory : null;
+    const memory = Object.create(null);
+    if (stored) {
+      for (const key of Object.keys(stored)) {
+        const e = stored[key];
+        if (!e || !safeMapKey(key, e.a, e.b)) continue;
+        memory[key] = {
+          a: e.a, b: e.b,
+          result: typeof e.result === 'string' ? e.result : '',
+          isNew: !!e.isNew,
+          source: e.source === 'seed' ? 'seed' : (e.source === 'migrated' ? 'migrated' : 'observed'),
+          verification: typeof e.verification === 'string' ? e.verification : '',
+          target: typeof e.target === 'string' ? e.target : '*',
+          hits: Number(e.hits) || 0,
+          confirms: Number(e.confirms) || 0,
+          refutations: Number(e.refutations) || 0,
+          at: Number(e.at) || 0,
+          updatedAt: Number(e.updatedAt) || 0,
+          lastRefutedAt: Number(e.lastRefutedAt) || 0,
+          disabled: !!e.disabled
+        };
+      }
+    } else {
+      const recipes = Array.isArray(data.recipes) ? data.recipes : [];
+      const failures = Array.isArray(data.failures) ? data.failures : [];
+      for (const r of recipes) {
+        if (!r || typeof r.a !== 'string' || typeof r.b !== 'string') continue;
+        memory[pairKey(r.a, r.b)] = {
+          a: r.a, b: r.b, result: String(r.result || ''), isNew: !!r.isNew,
+          source: 'migrated', verification: '', target: '*', hits: 1,
+          confirms: 0, refutations: 0, at: Number(r.at) || 0,
+          updatedAt: Number(r.at) || 0, lastRefutedAt: 0, disabled: false
+        };
+      }
+      for (const f of failures) {
+        if (!f || typeof f.a !== 'string' || typeof f.b !== 'string') continue;
+        memory[pairKey(f.a, f.b)] = {
+          a: f.a, b: f.b, result: '', isNew: false,
+          source: 'migrated', verification: '', target: '*', hits: 1,
+          confirms: 0, refutations: 0, at: Number(f.at) || 0,
+          updatedAt: Number(f.at) || 0, lastRefutedAt: 0, disabled: false
+        };
+      }
+    }
+    // Seeds never overwrite an observation; they only fill absent keys.
+    if ((data && data.recipeMemorySeedVersion) !== RECIPE_MEMORY_SEED_VERSION) {
+      for (const seed of SEED_RECIPES) {
+        const key = pairKey(seed.a, seed.b);
+        if (hasOwn(memory, key) && memory[key].source === 'observed') continue;
+        memory[key] = {
+          a: seed.a, b: seed.b, result: seed.result, isNew: false,
+          source: 'seed', verification: seed.verification || 'editorial',
+          target: seed.target || '*', hits: 0, confirms: 0, refutations: 0,
+          at: 0, updatedAt: 0, lastRefutedAt: 0, disabled: false
+        };
+      }
+    }
+    trimRecipeMemory(memory);
+    return memory;
+  }
+
   function loadPlan(data) {
     const p = (data && typeof data.plan === 'object') ? data.plan : {};
     const ladder = Array.isArray(p.ladder)
@@ -401,13 +720,25 @@
       ladder: ladder,
       activeIndex: Number.isInteger(p.activeIndex) ? Math.max(0, Math.min(CONFIG.ladderLength - 1, p.activeIndex)) : 0,
       mode: p.mode === 'continuation' ? 'continuation' : 'fresh',
-      refutedSteps: Array.isArray(p.refutedSteps)
-        ? p.refutedSteps.filter(s => typeof s === 'string').slice(-CONFIG.maxRefutedSteps) : [],
       refutedRecipes: Array.isArray(p.refutedRecipes)
         ? p.refutedRecipes.filter(r => r && typeof r.a === 'string' && typeof r.b === 'string').slice(-12) : [],
       craftsSinceReplan: Number.isFinite(p.craftsSinceReplan) ? p.craftsSinceReplan : 0,
       updatedAt: Number(p.updatedAt) || 0
     };
+  }
+
+  function loadElements(data) {
+    const result = Object.create(null);
+    const source = (data && data.elements && typeof data.elements === 'object' &&
+      !Array.isArray(data.elements)) ? data.elements : {};
+    for (const name of Object.keys(source)) {
+      if (!safeElementName(name)) continue;
+      const meta = source[name];
+      result[name] = meta && typeof meta === 'object'
+        ? Object.assign({}, meta)
+        : { emoji: '', firstSeen: 0 };
+    }
+    return result;
   }
 
   function loadKB() {
@@ -424,13 +755,15 @@
     if (!data || typeof data !== 'object') data = {};
     const loaded = {
       version: 1,
-      elements: (data.elements && typeof data.elements === 'object') ? data.elements : {},
+      elements: loadElements(data),
       recipes: Array.isArray(data.recipes) ? data.recipes : [],
       failures: Array.isArray(data.failures) ? data.failures : [],
       triedPairs: loadTriedPairs(data),
       plan: loadPlan(data),
       goals: Array.isArray(data.goals) ? data.goals.slice(-CONFIG.maxGoalsStored) : [],
-      hypotheses: Array.isArray(data.hypotheses) ? data.hypotheses.slice(-CONFIG.maxHypothesesStored) : [],
+      recipeMemory: loadRecipeMemory(data),
+      refutedSeeds: Array.isArray(data.refutedSeeds) ? data.refutedSeeds.slice(-500) : [],
+      recipeMemorySeedVersion: RECIPE_MEMORY_SEED_VERSION,
       patterns: Array.isArray(data.patterns)
         ? data.patterns.filter(n => typeof n === 'string')
         : [],
@@ -440,7 +773,6 @@
     };
     trimArray(loaded.recipes, CONFIG.maxRecipesStored);
     trimArray(loaded.failures, CONFIG.maxFailuresStored);
-    trimArray(loaded.hypotheses, CONFIG.maxHypothesesStored);
     return loaded;
   }
 
@@ -504,21 +836,84 @@
     trimArray(kb.failures, CONFIG.maxFailuresStored);
   }
 
-  // Predicted products are checked against the real result so the next prompt can
-  // refute bad guesses instead of letting the model repeat them confidently.
-  function recordHypothesis(proposal, actual) {
-    const predicted = proposal && typeof proposal.produces === 'string'
-      ? proposal.produces.trim().slice(0, 120) : '';
-    if (!predicted) return;
-    kb.hypotheses.push({
-      a: proposal.a,
-      b: proposal.b,
-      predicted: predicted,
-      actual: actual ? String(actual) : null,
-      correct: !!actual && predicted.toLowerCase() === String(actual).toLowerCase(),
-      at: Date.now()
-    });
-    trimArray(kb.hypotheses, CONFIG.maxHypothesesStored);
+  // Observed outcomes always win over seed expectations. A refuted seed is disabled
+  // and remembered; the game result becomes the stored truth for that pair.
+  function noteRecipeMemory(a, b, result, meta) {
+    const key = pairKey(a, b);
+    const prior = hasOwn(kb.recipeMemory, key) ? kb.recipeMemory[key] : null;
+    const entry = prior || {
+      a: a, b: b, result: '', isNew: false, source: 'observed', verification: '',
+      target: (meta && meta.target) || '*', hits: 0, confirms: 0, refutations: 0,
+      at: Date.now(), updatedAt: 0, lastRefutedAt: 0, disabled: false
+    };
+    entry.hits++;
+    entry.updatedAt = Date.now();
+    if (meta && meta.source) entry.source = meta.source;
+    if (meta && meta.target) entry.target = meta.target;
+
+    const expected = (meta && meta.expected) || '';
+    if (!expected) {
+      entry.result = result == null ? '' : String(result);
+      if (result != null) entry.isNew = !!(meta && meta.isNew);
+      if (entry.source === 'seed') entry.source = 'observed';
+    } else if (result != null && String(result).toLowerCase() !== expected.toLowerCase()) {
+      entry.refutations++;
+      entry.lastRefutedAt = Date.now();
+      entry.disabled = true;
+      entry.result = String(result);
+      entry.source = 'observed';
+      kb.refutedSeeds.push({
+        a: a, b: b, expected: expected, actual: String(result),
+        target: entry.target, at: Date.now()
+      });
+      trimArray(kb.refutedSeeds, 500);
+      recordEvent('seed_refuted', {
+        a: a, b: b, expected: expected, actual: String(result),
+        target: entry.target, pair: a + ' + ' + b
+      });
+      log('Seed refuted: ' + a + ' + ' + b + ' expected ' + expected + ', got ' + result, 'error');
+    } else {
+      entry.confirms++;
+      if (result != null) {
+        entry.result = String(result);
+        if (meta && meta.isNew) entry.isNew = true;
+      }
+    }
+    kb.recipeMemory[key] = entry;
+
+    trimRecipeMemory(kb.recipeMemory);
+  }
+
+  function reachableSeedSteps(target) {
+    const wanted = String(target).toLowerCase();
+    return SEED_RECIPES.filter(seed =>
+      seed.target === '*' || String(seed.target).toLowerCase() === wanted);
+  }
+
+  function findReachableSeedStep(target) {
+    for (const seed of reachableSeedSteps(target)) {
+      if (!hasElement(seed.a) || !hasElement(seed.b)) continue;
+      if (hasElement(seed.result)) continue;
+      if (isPairTried(seed.a, seed.b)) continue;
+      const mem = kb.recipeMemory[pairKey(seed.a, seed.b)];
+      if (mem && mem.disabled) continue;
+      return seed;
+    }
+    return null;
+  }
+
+  function reachableKnownRecipes(target, limit) {
+    const out = [];
+    for (const key of Object.keys(kb.recipeMemory)) {
+      const e = kb.recipeMemory[key];
+      if (!e || e.disabled || !e.result || hasElement(e.result)) continue;
+      if (!hasElement(e.a) || !hasElement(e.b)) continue;
+      if (isPairTried(e.a, e.b)) continue;
+      if (e.target !== '*' && String(e.target).toLowerCase() !== String(target).toLowerCase()) continue;
+      out.push(e);
+      if (out.length >= limit) break;
+    }
+    return out;
   }
 
   function loadSettings() {
@@ -880,6 +1275,17 @@
     els.log.appendChild(line);
     while (els.log.children.length > 200) els.log.removeChild(els.log.firstChild);
     els.log.scrollTop = els.log.scrollHeight;
+
+    // The DOM keeps 200 lines for readability; the export keeps the full timeline.
+    const session = state.session;
+    if (!session) return;
+    session.logLines.push(sanitizeEventData({
+      at: new Date().toISOString(), level: level, text: message
+    }));
+    if (session.logLines.length > MAX_SESSION_LOG_LINES) {
+      session.logLines.splice(0, session.logLines.length - MAX_SESSION_LOG_LINES);
+      session.droppedLogLines++;
+    }
   }
 
   function setStatus(text) {
@@ -1003,13 +1409,22 @@
   }
 
   function clearPlan(reason) {
-    if (kb.plan.ladder.length > 0) {
-      recordEvent('plan_clear', { reason: reason, ladder: kb.plan.ladder.slice() });
+    const ladderBefore = kb.plan.ladder.slice();
+    const activeBefore = kb.plan.activeIndex;
+    if (ladderBefore.length > 0) {
+      recordEvent('plan_clear', {
+        reason: reason || null,
+        ladderBefore: ladderBefore,
+        ladderAfter: [],
+        activeIndexBefore: activeBefore,
+        activeIndexAfter: 0,
+        craftBudget: kb.plan.craftsSinceReplan,
+        craftsSinceClosenessGain: state.craftsSinceClosenessGain
+      });
     }
     kb.plan.ladder = [];
     kb.plan.activeIndex = 0;
     kb.plan.mode = 'fresh';
-    kb.plan.refutedSteps = [];
     kb.plan.craftsSinceReplan = 0;
     kb.plan.updatedAt = Date.now();
     // Sticky recipes are observed game facts, so they survive a re-plan.
@@ -1025,49 +1440,75 @@
     if (hasElement(plan.ladder[plan.activeIndex]) && firstNeedIndex(plan.ladder) !== plan.activeIndex) {
       return 'active step already discovered';
     }
-    const active = plan.ladder[plan.activeIndex];
-    const refuted = plan.refutedSteps.filter(s => s.toLowerCase() === active.toLowerCase()).length;
-    if (refuted >= 2) return 'active step refuted twice';
     if (state.consecutiveNoNew >= CONFIG.consecutiveNoNewLimit) return 'no-progress watchdog';
     return null;
   }
 
   function applyPlanFeedback(target) {
     const plan = kb.plan;
+    const ladderBefore = plan.ladder.slice();
+    const activeBefore = plan.activeIndex;
     plan.craftsSinceReplan++;
     plan.updatedAt = Date.now();
     const last = state.lastCraft;
-    const active = plan.ladder[plan.activeIndex] || '';
-    if (last && last.result && active && last.result.toLowerCase() === active.toLowerCase()) {
-      const next = firstNeedIndex(plan.ladder);
-      plan.activeIndex = next;
-      recordEvent('plan_advance', { activeIndex: next, step: plan.ladder[next] || '' });
-      log('Plan advanced to step ' + next + ': ' + (plan.ladder[next] || '(complete)'), 'success');
+    if (!last || !last.result) {
+      state.craftsSinceClosenessGain++;
       saveKB();
       return;
     }
-    if (last && last.result && (last.result === last.a || last.result === last.b)) {
+    const ctx = buildClosenessContext(target);
+    const resultScore = scoreCloseness(last.result, target, ctx);
+    const active = plan.ladder[plan.activeIndex] || '';
+    const activeScore = active ? scoreCloseness(active, target, ctx) : 0;
+
+    if (resultScore >= CONFIG.minViableCloseness && resultScore > state.bestCloseness + 0.001) {
+      state.bestCloseness = resultScore;
+      state.craftsSinceClosenessGain = 0;
+    } else {
+      state.craftsSinceClosenessGain++;
+    }
+
+    // Advance on observed closeness, never on a model prediction or name equality.
+    if (resultScore > activeScore + 0.001 || last.result.toLowerCase() === target.toLowerCase()) {
+      const next = firstNeedIndex(plan.ladder);
+      plan.activeIndex = next;
+      recordEvent('plan_advance', {
+        activeIndex: next,
+        activeIndexBefore: activeBefore,
+        activeIndexAfter: next,
+        step: plan.ladder[next] || '',
+        ladderBefore: ladderBefore,
+        ladderAfter: plan.ladder.slice(),
+        reason: 'observed result ' + last.result + ' has closer score ' + resultScore.toFixed(3) +
+          ' than active step score ' + activeScore.toFixed(3),
+        observedResult: last.result,
+        closenessScore: resultScore,
+        craft: state.lastCraft
+      });
+      log('Closeness gain: ' + last.result + ' (' + resultScore.toFixed(2) +
+        '); plan advanced to step ' + next + '.', 'success');
+    }
+
+    // Sticky self-reproduction is an observed fact worth remembering, not a guess.
+    if (last.result === last.a || last.result === last.b) {
       if (!plan.refutedRecipes.some(r => r.a === last.a && r.b === last.b)) {
         plan.refutedRecipes.push({ a: last.a, b: last.b, result: last.result });
         plan.refutedRecipes = plan.refutedRecipes.slice(-12);
       }
       recordEvent('refutation', {
-        a: last.a, b: last.b, predicted: null, actual: last.result, sticky: true
+        a: last.a, b: last.b, actual: last.result, sticky: true,
+        reason: 'sticky recipe: observed result equals one of its parents',
+        refutedRecipe: { a: last.a, b: last.b, result: last.result },
+        plan: {
+          ladderBefore: ladderBefore,
+          ladderAfter: plan.ladder.slice(),
+          activeIndexBefore: activeBefore,
+          activeIndexAfter: plan.activeIndex,
+          refutedRecipes: plan.refutedRecipes.slice()
+        },
+        craft: state.lastCraft
       });
-      log('Plan: sticky result ' + last.result + ' refuted for ' + last.a + ' + ' + last.b, 'info');
-    } else if (last && last.result && last.isNew === false && active &&
-      last.result.toLowerCase() !== active.toLowerCase() &&
-      !plan.ladder.some(step => step.toLowerCase() === last.result.toLowerCase())) {
-      // Only a known-but-wrong result refutes a step; a NEW element is progress and
-      // feeds firstNeedIndex/HAVE state instead of the refutation count.
-      if (!plan.refutedSteps.some(s => s.toLowerCase() === active.toLowerCase())) {
-        plan.refutedSteps.push(active);
-        plan.refutedSteps = plan.refutedSteps.slice(-CONFIG.maxRefutedSteps);
-      }
-      recordEvent('refutation', {
-        a: last.a, b: last.b, predicted: active, actual: last.result, sticky: false
-      });
-      log('Plan: step "' + active + '" refuted by result ' + last.result, 'error');
+      log('Plan: sticky result ' + last.result + ' observed for ' + last.a + ' + ' + last.b, 'info');
     }
     saveKB();
   }
@@ -1154,6 +1595,10 @@
     for (const pair of kb.plan.refutedRecipes) {
       notes.push(pair.a + ' + ' + pair.b + ' → ' + pair.result + ' (sticky recipe; do not repeat)');
     }
+    for (const seed of kb.refutedSeeds.slice(-3)) {
+      notes.push(seed.a + ' + ' + seed.b + ' → ' + seed.actual +
+        ' (seed expected ' + seed.expected + '; refuted)');
+    }
 
     // Retained notes keep their original position; new ones append. The cap then
     // drops the oldest entries, so the prompt always shows the freshest 12.
@@ -1167,6 +1612,120 @@
   // would be blocked from a neal.fun origin. @connect grants the host.
   // ---------------------------------------------------------------------------
 
+  function bigrams(text) {
+    const compact = String(text).toLowerCase().replace(/[^a-z0-9]+/g, '').trim();
+    const out = new Set();
+    for (let i = 0; i < compact.length - 1; i++) out.add(compact.slice(i, i + 2));
+    return out;
+  }
+
+  function buildClosenessContext(target) {
+    const key = String(target).toLowerCase().trim();
+    const weights = TARGET_THEME_LEXICON[key] || null;
+    const tokens = weights
+      ? Object.keys(weights).map(t => ({ token: t, weight: weights[t] }))
+      : key.split(/[^a-z0-9]+/).filter(Boolean).map(t => ({ token: t, weight: 1 }));
+    const names = Object.keys(kb.elements);
+    const seen = names.map(n => Number(kb.elements[n] && kb.elements[n].firstSeen) || 0);
+    const degree = Object.create(null);
+    for (const pairKeyName of Object.keys(kb.triedPairs)) {
+      const p = kb.triedPairs[pairKeyName];
+      if (!p) continue;
+      degree[p.a] = (degree[p.a] || 0) + 1;
+      degree[p.b] = (degree[p.b] || 0) + 1;
+    }
+    const memoryIndex = Object.create(null);
+    const parentIndex = Object.create(null);
+    for (const keyName of Object.keys(kb.recipeMemory)) {
+      const e = kb.recipeMemory[keyName];
+      if (!e || !e.result) continue;
+      const low = e.result.toLowerCase();
+      memoryIndex[low] = (memoryIndex[low] || 0) + 1;
+      if (e.source === 'seed') continue;
+      for (const parent of [e.a, e.b]) {
+        if (!parentIndex[parent]) parentIndex[parent] = [];
+        parentIndex[parent].push(e);
+      }
+    }
+    return {
+      target: key,
+      tokens: tokens,
+      minSeen: seen.length ? Math.min.apply(null, seen) : 0,
+      maxSeen: seen.length ? Math.max.apply(null, seen) : 1,
+      degree: degree,
+      memoryIndex: memoryIndex,
+      parentIndex: parentIndex,
+      targetBigrams: bigrams(key),
+      topK: CONFIG.topKElements
+    };
+  }
+
+  function scoreCloseness(name, target, ctx, depth) {
+    const level = depth || 0;
+    if (!name || !ctx) return 0;
+    const low = String(name).toLowerCase();
+    let score = 0;
+    for (const t of ctx.tokens) {
+      if (low.indexOf(t.token) !== -1) score += 0.35 * t.weight;
+    }
+    const grams = bigrams(low);
+    let shared = 0;
+    for (const gram of grams) if (ctx.targetBigrams.has(gram)) shared++;
+    if (grams.size) score += 0.25 * (shared / grams.size);
+    if (ctx.degree[name]) score += Math.min(0.1, ctx.degree[name] * 0.02);
+    const seen = Number(kb.elements[name] && kb.elements[name].firstSeen) || 0;
+    if (ctx.maxSeen > ctx.minSeen) {
+      score += 0.1 * ((seen - ctx.minSeen) / (ctx.maxSeen - ctx.minSeen));
+    }
+    if (ctx.memoryIndex[low]) score += Math.min(0.15, ctx.memoryIndex[low] * 0.05);
+    // Memory recursion uses observed results only; depth is capped to bound cost.
+    if (level < 2) {
+      for (const e of (ctx.parentIndex[name] || [])) {
+        score += 0.1 * scoreCloseness(e.result, target, ctx, level + 1);
+      }
+    }
+    return Math.max(0, Math.min(1, score));
+  }
+
+  function rankElements(target, ctx) {
+    const context = ctx || buildClosenessContext(target);
+    return Object.keys(kb.elements)
+      .map(name => ({ name: name, score: scoreCloseness(name, target, context) }))
+      .sort((x, y) => y.score - x.score);
+  }
+
+  function selectPairs(target, count) {
+    // A trapped element can score high on theme terms but still be unusable; never
+    // anchor a required pair on a dead cluster.
+    const excluded = deadClusterElements(target);
+    const ranked = rankElements(target).filter(r => !excluded.has(r.name));
+    const closest = ranked.length ? ranked[0].name : '';
+    const pairs = [];
+    const seen = new Set();
+    const addPair = (a, b) => {
+      if (!a || !b || isPairTried(a, b)) return;
+      const key = pairKey(a, b);
+      if (seen.has(key)) return;
+      seen.add(key);
+      pairs.push({ a: a, b: b });
+    };
+    // The closest element always participates; it is the reachable anchor.
+    for (const entry of ranked) {
+      if (entry.name === closest) continue;
+      addPair(closest, entry.name);
+      if (pairs.length >= count) break;
+    }
+    const top = ranked.slice(0, Math.max(CONFIG.topKElements, 2)).map(r => r.name);
+    for (let i = 0; i < top.length; i++) {
+      for (let j = i; j < top.length; j++) {
+        addPair(top[i], top[j]);
+        if (pairs.length >= count) break;
+      }
+      if (pairs.length >= count) break;
+    }
+    return { closestElement: closest, pairs: pairs.slice(0, count), ranked: ranked };
+  }
+
   function pickElementNames(target, limit, ladder = [], activeName = '') {
     const entries = Object.keys(kb.elements).map(name => ({ name, meta: kb.elements[name] }));
     const maxSeen = entries.reduce((m, e) => Math.max(m, Number(e.meta && e.meta.firstSeen) || 0), 1);
@@ -1178,7 +1737,7 @@
     return entries.map(e => {
       const low = e.name.toLowerCase();
       let score = 0;
-      // The plan is the strongest relevance signal; no hardcoded recipe tables.
+      // Plan-aware ordering uses computed closeness, not static concept tables.
       if (activeLower && low === activeLower) score += 500;
       else if (ladderNames.indexOf(low) !== -1) score += 200;
       if (low === lowerTarget || low.includes(lowerTarget) || lowerTarget.includes(low)) score += 100;
@@ -1233,34 +1792,73 @@
   const LADDER_SYSTEM = `You are an Infinite Craft backward-chaining planner. Output a flat 5-name ladder of NEW intermediates, then propose pool pairs for its first name only.
 
 CONTRACT — ONE strict JSON object, no markdown, exactly these keys:
-{"strategy":"backward","analysis":"<=200 chars","ladder":["NEW name 1","NEW name 2","NEW name 3","NEW name 4","<TARGET>"],"active_index":0,"proposals":[{"a":"POOL name","b":"POOL name","produces":"ladder[0]","score":0,"why":"<=120 chars"}],"abstain":false}
+{"strategy":"backward","analysis":"<=200 chars","ladder":["NEW name 1","NEW name 2","NEW name 3","NEW name 4","<TARGET>"],"active_index":0,"proposals":[{"a":"POOL name","b":"POOL name","score":0,"why":"<=120 chars"}],"abstain":false}
 
 RULES:
 1. "ladder" is an array of exactly 5 STRINGS in execution order: the first thing you can craft now, then what that enables, ... ending with the exact string "<TARGET>".
-2. The first 4 ladder strings MUST be NEW names NOT present in AVAILABLE ELEMENTS. Check each one. Television, Film, Science, Time, Story, Fiction, Doctor, Robot, Alien, Movie, Book, Word are all ALREADY AVAILABLE — do not use them; make specific compounds such as "Television Show", "Time Traveler", "Police Box".
-3. "active_index" is always 0. Every proposal.produces MUST be exactly ladder[0], and ladder[0] must not equal either parent.
-4. Every proposal.a and proposal.b MUST be copied verbatim from CANDIDATE PARENT POOL. Names outside the pool are forbidden as arguments. The target is never an argument.
-5. proposals: 3 distinct pairs, none in FORBIDDEN. Scores 0-100 strictly decreasing, first >= 60.
-Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEMENTS; produces == ladder[0]; both arguments in the pool; 3 distinct non-forbidden pairs; scores descending.`;
+2. ladder[0] is the label for a code-preselected REACHABLE PAIR of owned elements shown under REQUIRED PAIRS. It must be a plausible product of that pair, not an invented remote concept. Never use "Time Traveler", "Police Box", or "TARDIS" as rung 0.
+3. "active_index" is always 0. ladder[0] must not equal either parent.
+4. Every proposal.a and proposal.b MUST be copied verbatim from CANDIDATE PARENT POOL. At least one proposal must use the REQUIRED PAIR verbatim and include the closest element. Names outside the pool are forbidden as arguments. The target is never an argument.
+5. proposals: 3 distinct pairs, none in FORBIDDEN. Scores 0-100 strictly decreasing, first >= 60. Product guesses are not part of this contract and are never used.
+Self-check before emitting: 5 ladder strings; ladder[0] labels the reachable required pair and is not a banned rung; both arguments in the pool; 3 distinct non-forbidden pairs; scores descending.`;
+
+  function deadClusterElements(target) {
+    const excluded = new Set();
+    const sticky = Object.create(null);
+    const outside = new Set();
+    for (const r of kb.recipes) {
+      if (!r || typeof r.a !== 'string' || typeof r.b !== 'string') continue;
+      if (r.result === r.a || r.result === r.b) {
+        // Credit only the repeated product, not both parents.
+        sticky[r.result] = (sticky[r.result] || 0) + 1;
+      } else if (r.result &&
+        String(r.result).toLowerCase() !== String(target).toLowerCase()) {
+        outside.add(r.a);
+        outside.add(r.b);
+      }
+    }
+    for (const name of Object.keys(sticky)) {
+      // Two sticky results and no escape to an outside product = dead cluster.
+      // An element that ever produced something else is vetoed from exclusion.
+      if (sticky[name] >= 2 && !outside.has(name) && !BASE_ELEMENTS.includes(name)) {
+        excluded.add(name);
+      }
+    }
+    return excluded;
+  }
 
   function candidatePool(target, limit) {
-    const ladder = kb.plan.ladder;
-    const blocked = new Set(ladder.filter(step => !hasElement(step)).map(step => step.toLowerCase()));
+    const excluded = deadClusterElements(target);
+    const owned = Object.keys(kb.elements);
+    const usedAsParent = new Set();
+    for (const key of Object.keys(kb.triedPairs)) {
+      const pair = kb.triedPairs[key];
+      if (!pair) continue;
+      usedAsParent.add(pair.a);
+      usedAsParent.add(pair.b);
+    }
+    const byRecency = owned.slice().sort((x, y) =>
+      (Number(kb.elements[y] && kb.elements[y].firstSeen) || 0) -
+      (Number(kb.elements[x] && kb.elements[x].firstSeen) || 0));
+    const newest = byRecency.slice(0, Math.ceil(limit / 2));
+    const unused = byRecency.filter(n => !usedAsParent.has(n)).slice(0, Math.ceil(limit / 2));
     const pool = [];
+    const seen = new Set();
     const add = (name) => {
       if (typeof name !== 'string' || !name.trim()) return;
       const clean = name.trim();
       const low = clean.toLowerCase();
-      if (low === String(target).toLowerCase() || blocked.has(low)) return;
-      if (pool.some(existing => existing.toLowerCase() === low)) return;
+      if (low === String(target).toLowerCase()) return;
+      if (!BASE_ELEMENTS.includes(clean) && excluded.has(clean)) return;
+      if (seen.has(low)) return;
+      seen.add(low);
       pool.push(clean);
     };
-    pickElementNames(target, limit, ladder, ladder[kb.plan.activeIndex] || '').forEach(add);
-    for (const r of kb.recipes) {
-      if (!r || r.isNew !== true) continue;
-      add(r.a);
-      add(r.b);
+    newest.forEach(add);
+    unused.forEach(add);
+    for (const name of byRecency) {
       if (pool.length >= limit) break;
+      add(name);
     }
     return pool.slice(0, limit);
   }
@@ -1274,11 +1872,11 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
 
     let system = LADDER_SYSTEM.replace(/<TARGET>/g, target);
     if (continuation) {
-      system += '\n\nCONTINUATION: copy the supplied ladder verbatim; set active_index to ' + activeIndex +
-        '; make every proposal.produces exactly ladder[' + activeIndex + '] = "' + activeName +
-        '". Keep rule 5.';
+      system += '\n\nCONTINUATION: copy the supplied ladder verbatim and keep rule 5.';
     }
 
+    const ctx = buildClosenessContext(target);
+    const selection = selectPairs(target, CONFIG.proposalsPerTurn);
     const pool = candidatePool(target, CONFIG.candidatePoolSize);
     const names = pickElementNames(target, CONFIG.maxElementsInPrompt, ladder, activeName);
     const recipes = uniqueLines(
@@ -1309,26 +1907,35 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
     const outcomeLines = uniqueLines(outcomes, o => '- ' + o.a + ' + ' + o.b + ' => ' +
       (hasOwn(o, 'result') ? String(o.result || 'no result') : 'no result') +
       (o.isNew === true ? ' [NEW]' : ' [already known]'));
-    const hypothesisLines = kb.hypotheses.slice(-5).map(h =>
-      '- ' + h.a + ' + ' + h.b + ': predicted ' + h.predicted + ' → got ' +
-      (h.actual ? h.actual : 'no result') + (h.correct ? ' (CORRECT)' : ' (WRONG)'));
+    const knownRecipes = reachableKnownRecipes(target, 20).map(e =>
+      '- ' + e.a + ' + ' + e.b + ' = ' + e.result + ' (' + e.source + '/' + e.verification + ')');
+    const newDiscovery = state.lastCraft && state.lastCraft.isNew
+      ? state.lastCraft.result : '(none since last plan)';
 
     const planStatus = continuation
       ? 'PLAN STATUS:\n' + ladder.map((step, i) =>
           (i + 1) + '. [' + (hasElement(step) ? 'HAVE' : 'NEED') + '] ' + step).join('\n') +
-        '\nACTIVE STEP: index ' + activeIndex + ' = "' + activeName +
-        '" (first NEED). All proposals must produce exactly "' + activeName + '".'
+        '\nACTIVE STEP: index ' + activeIndex + ' = "' + activeName + '".'
       : 'PLAN STATUS: (no plan — propose a new 5-name ladder)';
 
-    const strategyLine = state.consecutiveNoNew >= CONFIG.consecutiveNoNewLimit
-      ? 'STRATEGY OVERRIDE: explore. The last ' + state.consecutiveNoNew + ' crafts produced no new element.'
-      : 'PLANNING: work backward from the target; the ladder names the chain, the active step is the only craftable goal now.';
+    const strategyLine = 'PLANNING: work backward from the target using the reachable required pairs and the closeness ranking.';
 
     const parts = [
       'TARGET: ' + rawTarget + '\nCANONICAL TARGET: ' + target +
         '\nSUCCESS: the canonical target appears in DISCOVERED ELEMENTS (case-insensitive check, exact names when crafting).',
       planStatus,
       strategyLine,
+      'CLOSENESS RANKING (name: score):\n' +
+        (selection.ranked.slice(0, CONFIG.maxElementsInPrompt > 30 ? 30 : 10)
+          .map(r => '- ' + r.name + ': ' + r.score.toFixed(3)).join('\n') || '(none)'),
+      'CLOSIEST ELEMENT: ' + (selection.closestElement || '(none)'),
+      'REQUIRED PAIRS (include verbatim in proposals):\n' +
+        (selection.pairs.length
+          ? selection.pairs.map(p => '- ' + p.a + ' + ' + p.b).join('\n')
+          : '(none reachable — propose any untried pool pair)'),
+      'NEW DISCOVERY SINCE LAST PLAN: ' + newDiscovery,
+      'KNOWN RECIPES (reachable now; exact names):\n' +
+        (knownRecipes.length ? knownRecipes.join('\n') : '(none)'),
       'FORBIDDEN / ALREADY ATTEMPTED PAIRS (' + triedPairs.length + ' shown — BANNED, both orderings are the same pair):\n' +
         (triedPairs.length ? triedPairs.join('\n') : '(none yet)'),
       'AVAILABLE ELEMENTS (exact, case-sensitive; ' + names.length + ' shown):\n' +
@@ -1339,17 +1946,14 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
         (recipes.length ? recipes.join('\n') : '(none yet)'),
       'RECENT FAILURES (' + failures.length + '):\n' +
         (failures.length ? failures.join('\n') : '(none yet)'),
-      'LAST 10 CRAFT OUTCOMES (observed, not hypotheses):\n' +
+      'LAST 10 CRAFT OUTCOMES (observed):\n' +
         (outcomeLines.length ? outcomeLines.join('\n') : '(none yet)'),
-      'HYPOTHESIS CHECK (your past product guesses vs observed results):\n' +
-        (hypothesisLines.length ? hypothesisLines.join('\n') : '(none yet)'),
       'LEARNED NOTES:\n' +
         (kb.patterns.length ? kb.patterns.map(n => '- ' + n).join('\n') : '(none yet)'),
       'GOALS / SUBGOALS FROM LAST TURN (legacy notes):\n' + goals.join('\n'),
       'NOT YET EXPLORED: ' + unexploredHint(),
       'REQUEST: return exactly ' + CONFIG.proposalsPerTurn +
-        ' DISTINCT proposals, sorted by descending score, each producing the ACTIVE STEP ("' +
-        (activeName || target) + '").'
+        ' DISTINCT proposals, sorted by descending score, including a REQUIRED PAIR and the closest element.'
     ];
 
     state.planContext = {
@@ -1357,8 +1961,20 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
       ladder: ladder.slice(),
       activeIndex: activeIndex,
       continuation: continuation,
-      target: target
+      target: target,
+      requiredPairs: selection.pairs.slice(),
+      closestElement: selection.closestElement,
+      closeness: ctx
     };
+    if (state.session) {
+      state.session.closenessContext = {
+        target: ctx.target,
+        tokens: ctx.tokens,
+        topK: ctx.topK,
+        closestElement: selection.closestElement,
+        ranked: selection.ranked.slice(0, 10)
+      };
+    }
 
     return [
       { role: 'system', content: system },
@@ -1387,7 +2003,12 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
         },
         ontimeout: () => {
           if (state.activeRequest === request) state.activeRequest = null;
-          recordEvent('http_anomaly', { level: 'error', status: 0, message: 'gateway request timed out' });
+          recordAnomaly({
+            level: 'error', status: 0, code: 'TIMEOUT',
+            message: 'gateway request timed out', detail: null,
+            attempt: 0, backoffMs: 0, endpoint: path, timeoutMs: timeoutMs,
+            elapsedMs: sessionElapsedMs(), recovered: false
+          });
           reject(new KiloError('Gateway request timed out', 0, true));
         },
         onabort: () => {
@@ -1416,8 +2037,13 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
 
   async function callKilo(messages) {
     const useAuth = !state.freeMode && !!state.key;
+    const planningModel = state.planningModel || state.model;
+    if (!planningModel || isRouterModel(planningModel)) {
+      log('No usable non-router planning model; refusing to send a planning request.', 'error');
+      throw new StopSignal('No usable non-router planning model. Stopping.', 'error');
+    }
     const body = {
-      model: state.model,
+      model: planningModel,
       messages: messages,
       // Free gateway models are reasoning models. At a small budget they spend every
       // token on reasoning and return length/empty content, so turn reasoning off
@@ -1427,6 +2053,23 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
       temperature: CONFIG.temperature,
       stream: false
     };
+
+    if (state.session) state.session.aiRequestCount++;
+    recordEvent('ai_request', {
+      sequence: state.session ? state.session.aiRequestCount : 0,
+      aiAttempt: state.session ? state.session.aiRequestCount : 0,
+      purpose: state.requestPurpose || 'plan',
+      isFallback: false,
+      fallbackReason: null,
+      model: body.model,
+      messages: body.messages,
+      max_tokens: body.max_tokens,
+      temperature: body.temperature,
+      reasoning: body.reasoning,
+      stream: body.stream,
+      timeoutMs: CONFIG.requestTimeoutMs,
+      elapsedMs: sessionElapsedMs()
+    });
 
     async function postChatCompletion(requestBody, timeoutMs = CONFIG.requestTimeoutMs, maxTransientRetries = 2) {
       let transientRetries = 0;
@@ -1439,7 +2082,14 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
           if (e instanceof StopSignal) throw e;
           if (e.retryable && transientRetries < maxTransientRetries) {
             transientRetries++;
-            recordEvent('http_anomaly', { level: 'error', status: 0, message: 'transport error: ' + e.message });
+            recordAnomaly({
+              level: 'error', status: e.status || 0, code: 'TRANSPORT',
+              message: 'transport error: ' + e.message,
+              detail: e.message, errorName: e.name,
+              attempt: transientRetries, backoffMs: 800 * transientRetries,
+              endpoint: GATEWAY_PATHS.chat, timeoutMs: timeoutMs,
+              elapsedMs: sessionElapsedMs(), recovered: false
+            });
             log('Gateway transport error (' + e.message + '); retrying.', 'error');
             await jitterSleep(800 * transientRetries);
             continue;
@@ -1455,8 +2105,12 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
               throw new StopSignal('Repeated HTTP 429 rate limits. Stopping.', 'error');
             }
             const wait = Math.min(1000 * Math.pow(2, state.rateLimitHits - 1), 20000);
-            recordEvent('http_anomaly', {
-              level: 'error', status: 429, message: 'HTTP 429, backing off ' + wait + ' ms'
+            recordAnomaly({
+              level: 'error', status: 429, code: 'RATE_LIMIT',
+              message: 'HTTP 429, backing off ' + wait + ' ms', detail: detail,
+              attempt: state.rateLimitHits, backoffMs: wait,
+              endpoint: GATEWAY_PATHS.chat, timeoutMs: timeoutMs,
+              elapsedMs: sessionElapsedMs(), recovered: false
             });
             log('HTTP 429 (' + detail + '). Backing off ' + wait + ' ms [' + state.rateLimitHits + '/5].', 'error');
             await jitterSleep(wait, false);
@@ -1467,8 +2121,12 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
           }
           if (response.status >= 500 && transientRetries < maxTransientRetries) {
             transientRetries++;
-            recordEvent('http_anomaly', {
-              level: 'error', status: response.status, message: 'gateway error, retrying'
+            recordAnomaly({
+              level: 'error', status: response.status, code: 'SERVER_ERROR',
+              message: 'gateway error, retrying', detail: detail,
+              attempt: transientRetries, backoffMs: 1000 * transientRetries,
+              endpoint: GATEWAY_PATHS.chat, timeoutMs: timeoutMs,
+              elapsedMs: sessionElapsedMs(), recovered: false
             });
             log('Gateway ' + response.status + ' (' + detail + '); retrying.', 'error');
             await jitterSleep(1000 * transientRetries);
@@ -1478,6 +2136,10 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
         }
 
         state.rateLimitHits = 0;
+        if (state.lastAnomalyRecord) {
+          state.lastAnomalyRecord.recovered = true;
+          state.lastAnomalyRecord = null;
+        }
         let json;
         try {
           json = JSON.parse(response.responseText);
@@ -1485,11 +2147,16 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
           throw new KiloError('Malformed JSON from gateway: ' + e.message, 200, false);
         }
         const choice = json && json.choices && json.choices[0];
-        return {
+        state.lastAiResponse = {
           status: 200,
           content: choice && choice.message && choice.message.content,
-          finishReason: choice && choice.finish_reason
+          finishReason: choice && choice.finish_reason,
+          usage: json.usage || null,
+          model: json.model || requestBody.model,
+          isFallback: requestBody.max_tokens === CONFIG.fallbackMaxTokens,
+          responseId: json.id || null
         };
+        return state.lastAiResponse;
       }
     }
 
@@ -1506,25 +2173,45 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
       throw new KiloError('HTTP ' + first.status + ': ' + first.detail, first.status, false);
     }
 
+    const fallbackReason = mandatoryReasoning ? 'reasoning is mandatory' : 'reasoning budget truncated content';
     recordEvent('fallback', {
-      reason: mandatoryReasoning ? 'reasoning is mandatory' : 'reasoning budget truncated content',
-      model: state.model,
+      reason: fallbackReason,
+      model: planningModel,
       maxTokens: CONFIG.fallbackMaxTokens,
-      timeoutMs: CONFIG.fallbackTimeoutMs
+      timeoutMs: CONFIG.fallbackTimeoutMs,
+      firstStatus: first.status,
+      firstFinishReason: first.finishReason || null,
+      elapsedMs: sessionElapsedMs()
     });
-    log('Reasoning blocked the answer; retrying ' + state.model + ' at ' + CONFIG.fallbackMaxTokens +
+    log('Reasoning blocked the answer; retrying ' + planningModel + ' at ' + CONFIG.fallbackMaxTokens +
       ' tokens with a ' + CONFIG.fallbackTimeoutMs + ' ms timeout.', 'info');
     const fallbackBody = {
-      model: state.model,
+      model: planningModel,
       messages: messages,
       max_tokens: CONFIG.fallbackMaxTokens,
       temperature: CONFIG.temperature,
       stream: false
     };
     // This endpoint rejects any reasoning-disabling field, even low effort.
-    if (!/^liquid\/lfm-3-1\.7b:free$/i.test(state.model)) {
+    if (!/^liquid\/lfm-3-1\.7b:free$/i.test(planningModel)) {
       fallbackBody.reasoning = { effort: 'low' };
     }
+    if (state.session) state.session.aiRequestCount++;
+    recordEvent('ai_request', {
+      sequence: state.session ? state.session.aiRequestCount : 0,
+      aiAttempt: state.session ? state.session.aiRequestCount : 0,
+      purpose: state.requestPurpose || 'plan',
+      isFallback: true,
+      fallbackReason: fallbackReason,
+      model: fallbackBody.model,
+      messages: fallbackBody.messages,
+      max_tokens: fallbackBody.max_tokens,
+      temperature: fallbackBody.temperature,
+      reasoning: fallbackBody.reasoning || null,
+      stream: fallbackBody.stream,
+      timeoutMs: CONFIG.fallbackTimeoutMs,
+      elapsedMs: sessionElapsedMs()
+    });
     const second = await postChatCompletion(fallbackBody, CONFIG.fallbackTimeoutMs, 1);
     if (second.status !== 200) {
       throw new KiloError('HTTP ' + second.status + ': ' + second.detail, second.status, false);
@@ -1535,6 +2222,18 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
     return second.content;
   }
 
+  function proposalRejection(reason, obj, details, tried, invalid) {
+    return {
+      rejected: true,
+      reason: reason,
+      rawObject: obj || null,
+      droppedDetails: details || [],
+      droppedTried: tried || 0,
+      droppedInvalid: invalid || 0,
+      rawCount: obj && Array.isArray(obj.proposals) ? obj.proposals.length : 0
+    };
+  }
+
   function parseProposals(content) {
     if (typeof content !== 'string') return null;
     const text = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
@@ -1543,18 +2242,24 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
     try {
       obj = JSON.parse(text);
     } catch (e) {
-      return null;
+      return proposalRejection('malformed_json', null, [], 0, 0);
     }
-    if (!obj || typeof obj !== 'object' || !Array.isArray(obj.proposals)) return null;
+    if (!obj || typeof obj !== 'object' || !Array.isArray(obj.proposals)) {
+      return proposalRejection('missing_proposals_array', obj, [], 0, 0);
+    }
     const context = state.planContext;
-    if (!context) return null;
+    if (!context) return proposalRejection('missing_plan_context', obj, [], 0, 0);
 
     const ladder = Array.isArray(obj.ladder) && obj.ladder.length === CONFIG.ladderLength &&
       obj.ladder.every(step => typeof step === 'string' && step.trim().length > 0)
       ? obj.ladder.map(step => step.trim()) : null;
-    if (!ladder || ladder[ladder.length - 1].toLowerCase() !== context.target.toLowerCase()) return null;
+    if (!ladder || ladder[ladder.length - 1].toLowerCase() !== context.target.toLowerCase()) {
+      return proposalRejection('invalid_ladder_or_target', obj, [], 0, 0);
+    }
     if (context.continuation && ladder.some((step, i) =>
-      step.toLowerCase() !== context.ladder[i].toLowerCase())) return null;
+      step.toLowerCase() !== context.ladder[i].toLowerCase())) {
+      return proposalRejection('ladder_changed_on_continuation', obj, [], 0, 0);
+    }
     const activeIndex = context.continuation ? context.activeIndex : 0;
     const activeStep = ladder[activeIndex];
 
@@ -1565,49 +2270,74 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
     const valid = [];
     let droppedTried = 0;
     let droppedInvalid = 0;
+    const droppedDetails = [];
 
     for (const p of obj.proposals) {
       if (!p || typeof p !== 'object') {
         droppedInvalid++;
+        droppedDetails.push({ reason: 'malformed_entry', proposal: p });
         continue;
       }
       const a = typeof p.a === 'string' ? p.a.trim() : '';
       const b = typeof p.b === 'string' ? p.b.trim() : '';
       if (!a || !b || !hasOwn(kb.elements, a) || !hasOwn(kb.elements, b)) {
         droppedInvalid++;
-        continue;
-      }
-      const produces = typeof p.produces === 'string' ? p.produces.trim() : '';
-      if (produces.toLowerCase() !== activeStep.toLowerCase()) {
-        droppedInvalid++;
+        droppedDetails.push({ reason: 'invalid_element_name', proposal: p });
         continue;
       }
       if (!context.pool.some(n => n.toLowerCase() === a.toLowerCase()) ||
           !context.pool.some(n => n.toLowerCase() === b.toLowerCase())) {
         droppedInvalid++;
+        droppedDetails.push({ reason: 'outside_candidate_pool', proposal: p });
         continue;
       }
       const key = pairKey(a, b);
       if (isPairTried(a, b) || seen.has(key)) {
         droppedTried++;
+        droppedDetails.push({ reason: isPairTried(a, b) ? 'already_tried' : 'duplicate_in_batch', proposal: p });
         continue;
       }
       if (typeof p.score !== 'number' || !Number.isFinite(p.score)) {
         droppedInvalid++;
+        droppedDetails.push({ reason: 'invalid_score', proposal: p });
         continue;
       }
       const score = p.score;
       seen.add(key);
-      // "produces" is a hypothesis kept only for post-hoc refutation in HYPOTHESIS CHECK.
       valid.push({
         a: a,
         b: b,
-        produces: produces.slice(0, 120),
         score: Math.max(0, Math.min(100, Math.round(score))),
         why: typeof p.why === 'string' ? p.why.slice(0, 200) : ''
       });
     }
-    if (valid.length < 2) return null;
+
+    // Reachability gate: the model must follow code-selected pairs. Inject one if
+    // it did not, rather than rejecting a whole batch over a fiction prediction.
+    const required = (context.requiredPairs || []).find(p => !isPairTried(p.a, p.b));
+    if (required && hasOwn(kb.elements, required.a) && hasOwn(kb.elements, required.b) &&
+      context.pool.some(n => n.toLowerCase() === required.a.toLowerCase()) &&
+      context.pool.some(n => n.toLowerCase() === required.b.toLowerCase())) {
+      const rk = pairKey(required.a, required.b);
+      const present = valid.some(p => pairKey(p.a, p.b) === rk);
+      if (!present) {
+        valid.push({
+          a: required.a, b: required.b, score: 100,
+          why: 'code-selected reachable pair', injected: true
+        });
+      } else {
+        for (const p of valid) {
+          if (pairKey(p.a, p.b) === rk) p.score = 100;
+        }
+      }
+    }
+    for (const p of valid) {
+      const mem = kb.recipeMemory[pairKey(p.a, p.b)];
+      if (mem && mem.source === 'seed' && !mem.disabled) p.score = 100;
+    }
+    if (valid.length < 2) {
+      return proposalRejection('too_few_valid_proposals', obj, droppedDetails, droppedTried, droppedInvalid);
+    }
 
     const subgoals = [];
     if (Array.isArray(obj.subgoals)) {
@@ -1645,14 +2375,17 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
     valid.rawCount = obj.proposals.length;
     valid.droppedTried = droppedTried;
     valid.droppedInvalid = droppedInvalid;
+    valid.droppedDetails = droppedDetails;
     return valid;
   }
 
   async function askForProposals(messages) {
     for (let attempt = 1; attempt <= 2; attempt++) {
       assertRunning();
-      recordEvent('ai_request', { attempt: attempt, model: state.model });
-      let content;
+      state.requestPurpose = attempt === 2
+        ? 'repair'
+        : (state.planContext && state.planContext.continuation ? 'continuation' : 'plan');
+      let content = '';
       try {
         content = await callKilo(messages);
       } catch (e) {
@@ -1663,19 +2396,33 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
       const batch = parseProposals(content);
       const mostlyTried = !!batch && batch.rawCount > 0 &&
         (batch.droppedTried / batch.rawCount) > CONFIG.repairDropRatio;
-      if (batch && !mostlyTried && !batch.abstain) {
+      if (batch && !batch.rejected && !mostlyTried && !batch.abstain) {
+        const previousLadder = kb.plan.ladder.slice();
+        const previousActive = kb.plan.activeIndex;
         kb.goals = batch.subgoals;
         kb.plan.ladder = batch.ladder.slice();
         kb.plan.activeIndex = batch.activeIndex;
         kb.plan.mode = state.planContext.continuation ? 'continuation' : 'fresh';
-        kb.plan.craftsSinceReplan = 0;
+        // Budget resets only when a genuinely fresh plan is committed, not on
+        // every accepted continuation reply.
+        if (!state.planContext.continuation) kb.plan.craftsSinceReplan = 0;
         kb.plan.updatedAt = Date.now();
         // A committed fresh plan is the watchdog grace period; the dry spell resets.
         if (!state.planContext.continuation) state.consecutiveNoNew = 0;
         saveKB();
+        const responseMeta = state.lastAiResponse || {};
         recordEvent('ai_response', {
+          accepted: true,
+          rawContent: content,
+          finishReason: responseMeta.finishReason || null,
+          usage: responseMeta.usage || null,
+          responseModel: responseMeta.model || state.model,
+          responseId: responseMeta.responseId || null,
+          isFallback: !!responseMeta.isFallback,
+          elapsedMs: sessionElapsedMs(),
           strategy: batch.strategy,
           analysis: batch.analysis,
+          abstain: batch.abstain,
           subgoals: batch.subgoals,
           ladder: batch.ladder.slice(),
           activeIndex: batch.activeIndex,
@@ -1683,14 +2430,19 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
           used: batch.length,
           droppedTried: batch.droppedTried,
           droppedInvalid: batch.droppedInvalid,
+          droppedDetails: batch.droppedDetails || [],
           proposals: batch.map(p => ({
-            a: p.a, b: p.b, produces: p.produces, score: p.score, why: p.why
+            a: p.a, b: p.b, score: p.score, why: p.why, injected: !!p.injected
           }))
         });
         recordEvent('plan_created', {
-          ladder: batch.ladder.slice(),
-          activeIndex: batch.activeIndex,
-          mode: kb.plan.mode
+          ladderBefore: previousLadder,
+          ladderAfter: batch.ladder.slice(),
+          activeIndexBefore: previousActive,
+          activeIndexAfter: batch.activeIndex,
+          mode: kb.plan.mode,
+          reason: previousLadder.length ? 'continuation of accepted ladder' : 'new ladder from AI response',
+          requiredPairs: state.planContext.requiredPairs || []
         });
         log('AI strategy: ' + batch.strategy + (batch.analysis ? ' — ' + batch.analysis : ''), 'info');
         log('Plan ladder: ' + batch.ladder.join(' → '), 'info');
@@ -1700,12 +2452,38 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
         return batch;
       }
 
+      const failedMeta = state.lastAiResponse || {};
+      const rejection = batch && batch.rejected ? batch : null;
+      recordEvent('ai_response', {
+        accepted: false,
+        rawContent: content,
+        finishReason: failedMeta.finishReason || null,
+        usage: failedMeta.usage || null,
+        responseModel: failedMeta.model || state.model,
+        isFallback: !!failedMeta.isFallback,
+        elapsedMs: sessionElapsedMs(),
+        strategy: batch && !batch.rejected ? batch.strategy : null,
+        analysis: batch && !batch.rejected ? batch.analysis : null,
+        received: batch ? batch.rawCount : 0,
+        droppedTried: batch ? batch.droppedTried : 0,
+        droppedInvalid: batch ? batch.droppedInvalid : 0,
+        droppedDetails: batch ? batch.droppedDetails : [],
+        ladder: batch && !batch.rejected ? batch.ladder : null,
+        subgoals: batch && !batch.rejected ? batch.subgoals : null,
+        rejectionReason: rejection ? rejection.reason : null,
+        rawResponseObject: rejection ? rejection.rawObject : null,
+        failureReason: rejection
+          ? rejection.reason
+          : (batch ? (batch.abstain ? 'abstained' : 'mostly tried pairs') : 'malformed JSON or schema rejection')
+      });
       if (attempt === 2) {
         const reason = batch
-          ? (batch.abstain
-              ? 'AI abstained twice; stopping.'
-              : 'Frontier exhausted: ' + batch.droppedTried + '/' + batch.rawCount +
-                ' proposals were already tried after repair. Stopping.')
+          ? (batch.rejected
+              ? 'AI response rejected (' + batch.reason + '); stopping.'
+              : (batch.abstain
+                  ? 'AI abstained twice; stopping.'
+                  : 'Frontier exhausted: ' + batch.droppedTried + '/' + batch.rawCount +
+                    ' proposals were already tried after repair. Stopping.'))
           : 'AI kept returning malformed batches. Stopping.';
         clearPlan(reason);
         throw new StopSignal(reason, 'error');
@@ -1750,6 +2528,20 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
     return CONFIG.slowModelIds.some(slow => id === slow || id.indexOf(slow + ':') === 0);
   }
 
+  function isRouterModel(id) {
+    return /^reflection\//i.test(id) || /router/i.test(id) || /beam/i.test(id);
+  }
+
+  function resolvePlanningModel(ids) {
+    for (const id of CONFIG.planningModelIds) {
+      if (ids.indexOf(id) !== -1 && !isSlowModel(id) && !isRouterModel(id)) return id;
+    }
+    const usable = ids.filter(id => !isRouterModel(id) && !isSlowModel(id));
+    if (usable.length) return usable[0];
+    // Fail closed: never hand planning to a router, even in a router-only catalog.
+    return ids.find(id => !isRouterModel(id)) || '';
+  }
+
   function getFreeModelIds(catalog) {
     const models = (catalog && Array.isArray(catalog.data)) ? catalog.data : [];
     const ids = [];
@@ -1791,7 +2583,9 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
       const stale = id === saved && ids.indexOf(id) === -1;
       els.model.appendChild(el('option', {
         value: id,
-        text: stale ? id + ' (saved, not in catalog)' : id
+        text: stale
+          ? id + ' (saved, not in catalog)'
+          : (isRouterModel(id) ? id + ' (router — planning falls back)' : id)
       }));
     }
     if (current) els.model.value = current;
@@ -1814,6 +2608,7 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
 
   async function resolveModel() {
     let catalog = null;
+    let usedFallback = false;
     let ids = state.freeModelIds;
     if (!ids || !ids.length) {
       try {
@@ -1827,26 +2622,60 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
     }
     if (!ids.length) {
       ids = CONFIG.fallbackFreeModels.slice();
+      usedFallback = true;
       log('Free model catalog unavailable. Using unverified fallback ' + ids[0] + '.', 'error');
     }
 
     const saved = state.modelOverride;
+    let path = 'auto';
+    let reason = 'first free catalog id';
     let chosen = null;
     if (saved && isSlowModel(saved)) {
       log('Warning: saved model ' + saved + ' is known-slow and may time out; keeping your choice.', 'error');
     }
     if (saved && (ids.indexOf(saved) !== -1 || isSlowModel(saved))) {
       chosen = saved;
+      path = 'saved_override';
+      reason = isSlowModel(saved) ? 'saved override honored despite known-slow warning' : 'saved override present in free list';
       log('Using saved model override ' + saved + '. Clear it to use preferred fast model ' +
         CONFIG.preferredFastModel + '.', 'info');
     } else if (state.autoModel && ids.indexOf(state.autoModel) !== -1) {
       chosen = state.autoModel;
+      path = 'auto';
+      reason = 'previous auto-selected model still in free list';
     } else {
       chosen = ids.indexOf(CONFIG.preferredFastModel) !== -1 ? CONFIG.preferredFastModel : ids[0];
+      path = ids.indexOf(CONFIG.preferredFastModel) !== -1 ? 'preferred_fast' : (usedFallback ? 'fallback' : 'auto');
+      reason = path === 'preferred_fast'
+        ? 'measured-fast preferred model present'
+        : (usedFallback ? 'catalog unavailable, unverified fallback' : 'first free catalog id');
       if (saved) log('Saved model ' + saved + ' is no longer free/current; using ' + chosen + '.', 'error');
     }
     state.autoModel = chosen;
     state.model = chosen;
+    const routerDemoted = !CONFIG.honorRouterOverrideForPlanning && isRouterModel(chosen);
+    const planningReason = routerDemoted
+      ? 'saved router model demoted for planning'
+      : (CONFIG.honorRouterOverrideForPlanning ? 'router override honored for planning' : 'non-router model plans directly');
+    state.planningModel = routerDemoted ? resolvePlanningModel(ids) : chosen;
+    if (routerDemoted) {
+      log('Saved router model ' + chosen + ' is weak for planning; planning calls will use ' +
+        state.planningModel + '. Clear it with Preferred.', 'error');
+    }
+    recordEvent('model_selected', {
+      model: chosen,
+      planningModel: state.planningModel,
+      routerDemoted: routerDemoted,
+      planningReason: planningReason,
+      path: path,
+      reason: reason,
+      savedOverride: saved || '',
+      candidates: ids.slice(),
+      preferred: CONFIG.preferredFastModel,
+      usedFallback: usedFallback,
+      knownSlow: isSlowModel(chosen),
+      elapsedMs: sessionElapsedMs()
+    });
     log('Using free model: ' + chosen, 'info');
     return chosen;
   }
@@ -1855,6 +2684,7 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
     GM_setValue(STORAGE.model, '');
     state.modelOverride = '';
     state.autoModel = null;
+    state.planningModel = '';
     log('Saved model override cleared; refreshing the free model list.', 'info');
     void refreshModelOptions();
   }
@@ -1864,6 +2694,7 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
   // ---------------------------------------------------------------------------
 
   async function craftPair(a, b, IC, proposal) {
+    const startedMs = Date.now();
     // A tried pair must never reach IC.craft, even if every other filter misses it.
     if (isPairTried(a, b)) {
       log('Skipped already-tried pair: ' + a + ' + ' + b, 'info');
@@ -1872,7 +2703,8 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
     const beforeItems = IC.getItems();
     const beforeNames = new Set(beforeItems.map(item => item && item.text));
     const beforeLen = beforeItems.length;
-    const predicted = proposal && typeof proposal.produces === 'string' ? proposal.produces.trim() : '';
+    // Only hand-written seeds carry `expected`; model guesses never do.
+    const expected = proposal && typeof proposal.expected === 'string' ? proposal.expected.trim() : '';
     const executor = state.dragMode ? 'drag' : 'instant';
     let result;
     if (state.dragMode) {
@@ -1880,7 +2712,12 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
       if (dragOutcome && dragOutcome.infraFailure) {
         recordEvent('craft', {
           a: a, b: b, executor: executor, infraFailure: true, reason: dragOutcome.reason,
-          predicted: predicted, correct: false
+          expected: expected || null,
+          proposal: proposal || null,
+          elementCountBefore: beforeLen,
+          elementCountAfter: IC.getItems().length,
+          elapsedMs: Date.now() - startedMs,
+          dragDiagnostics: state.lastDragDiagnostics
         });
         log('Drag mode: ' + dragOutcome.reason + ' — aborting without recording the pair.', 'error');
         throw new StopSignal('Drag mode infrastructure failure. Stopping.', 'error');
@@ -1898,12 +2735,21 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
     if (result == null) {
       recordFailure(a, b);
       markPairTried(a, b, null, false);
-      recordHypothesis(proposal, null);
+      noteRecipeMemory(a, b, null, {
+        expected: expected,
+        source: expected ? 'seed' : 'observed',
+        target: state.session ? state.session.canonical : ''
+      });
       updatePatterns();
       saveKB();
       recordEvent('craft', {
         a: a, b: b, executor: executor, result: null, isNew: false,
-        predicted: predicted, correct: false, infraFailure: false
+        expected: expected || null, infraFailure: false,
+        proposal: proposal || null,
+        elementCountBefore: beforeLen,
+        elementCountAfter: IC.getItems().length,
+        elapsedMs: Date.now() - startedMs,
+        dragDiagnostics: state.lastDragDiagnostics
       });
       log(a + ' + ' + b + ' → no result', 'fail');
       state.lastCraft = { a: a, b: b, result: null, isNew: false };
@@ -1916,14 +2762,28 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
     const isNew = IC.getItems().length > beforeLen && !beforeNames.has(name);
     recordRecipe(a, b, name, isNew);
     markPairTried(a, b, name, isNew);
-    recordHypothesis(proposal, name);
+    noteRecipeMemory(a, b, name, {
+      expected: expected,
+      isNew: isNew,
+      source: expected ? 'seed' : 'observed',
+      target: state.session ? state.session.canonical : ''
+    });
     updatePatterns();
     saveKB();
     recordEvent('craft', {
       a: a, b: b, executor: executor, result: name, isNew: isNew,
-      predicted: predicted,
-      correct: !!predicted && predicted.toLowerCase() === name.toLowerCase(),
-      infraFailure: false
+      expected: expected || null,
+      seedMatched: expected ? expected.toLowerCase() === name.toLowerCase() : null,
+      infraFailure: false,
+      fullResult: result,
+      resultText: name,
+      resultEmoji: result && result.emoji ? result.emoji : '',
+      resultId: result && result.id !== undefined ? result.id : null,
+      proposal: proposal || null,
+      elementCountBefore: beforeLen,
+      elementCountAfter: IC.getItems().length,
+      elapsedMs: Date.now() - startedMs,
+      dragDiagnostics: state.lastDragDiagnostics
     });
     log(a + ' + ' + b + ' → ' + name + (isNew ? '  ✓ NEW' : ''), isNew ? 'success' : 'info');
     state.lastCraft = { a: a, b: b, result: name, isNew: isNew };
@@ -2210,6 +3070,17 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
     let py = 0;
     let completed = false;
     let tileA = null;
+    state.lastDragDiagnostics = {
+      input: state.dragTouch ? 'touch' : 'mouse',
+      spawnPositions: positions,
+      createdIds: createdIds.slice(),
+      steps: 12,
+      stepDelayMs: Math.round(CONFIG.dragDurationMs / 12),
+      spawnOk: false,
+      hoverMatched: false,
+      observerOutcome: null,
+      cleanup: []
+    };
     try {
       const first = await spawnTileFromBook(a, positions[0], createdIds);
       assertRunning();
@@ -2217,6 +3088,7 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
       const second = await spawnTileFromBook(b, positions[1], createdIds);
       assertRunning();
       if (!second.ok) return { infraFailure: true, reason: second.reason };
+      state.lastDragDiagnostics.spawnOk = true;
 
       // Tiles are selected by the ids just created, never by a stale name match.
       tileA = findTileById(first.id);
@@ -2265,6 +3137,7 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
       if (!hovered) {
         return { infraFailure: true, reason: 'the intended tile never registered .instance-hover' };
       }
+      state.lastDragDiagnostics.hoverMatched = true;
       fireDrag(page || window, 'end', bx, by, px, py, tileA);
       heldButton = false;
 
@@ -2277,15 +3150,19 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
       }
       assertRunning();
       if (outcome === CANCELLED) {
+        state.lastDragDiagnostics.observerOutcome = 'cancelled';
         return { infraFailure: true, reason: 'result observer was cancelled' };
       }
       if (outcome === NO_RESULT) {
+        state.lastDragDiagnostics.observerOutcome = 'no_result';
         completed = true;
         return null;
       }
       if (typeof outcome !== 'string' || !outcome) {
+        state.lastDragDiagnostics.observerOutcome = 'unexpected';
         return { infraFailure: true, reason: 'unexpected result' };
       }
+      state.lastDragDiagnostics.observerOutcome = 'result:' + outcome;
       completed = true;
       log('Drag mode produced ' + outcome, 'info');
       return outcome;
@@ -2298,11 +3175,19 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
         if (heldButton) {
           fireDrag(page || window, 'end', px, py, px, py, tileA);
           heldButton = false;
+          state.lastDragDiagnostics.cleanup.push('released held pointer');
         }
-        if (watcher) watcher.cancel();
+        if (watcher) {
+          watcher.cancel();
+          state.lastDragDiagnostics.cleanup.push('cancelled result watcher');
+        }
         // Only tiles created by this drag are removed; the player's tiles stay put.
-        if (!completed) removeSpawnedTiles(createdIds);
+        if (!completed) {
+          removeSpawnedTiles(createdIds);
+          state.lastDragDiagnostics.cleanup.push('removed ' + createdIds.length + ' spawned tiles');
+        }
       } catch (e) {
+        state.lastDragDiagnostics.cleanup.push('cleanup error: ' + e.message);
         log('Drag mode cleanup error: ' + e.message, 'error');
       }
     }
@@ -2324,6 +3209,9 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
     state.stopped = false;
     state.rateLimitHits = 0;
     state.consecutiveNoNew = 0;
+    state.craftsSinceClosenessGain = 0;
+    state.bestCloseness = 0;
+    state.planningModel = '';
     setRunningUI(true);
     setStatus('Running…');
     log('Start → target: ' + rawTarget + ' (canonical: ' + target + ') | Mode: ' +
@@ -2335,9 +3223,9 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
       const IC = await waitForIC(15000);
       state.IC = IC;
       syncElementsFromGame(IC);
+      state.session.kbAtStart = kbSnapshot();
       await resolveModel();
       state.session.model = state.model;
-      recordEvent('model', { model: state.model });
       assertRunning();
 
       planLoop:
@@ -2351,8 +3239,51 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
           break;
         }
 
+        // A reachable seed step is deterministic progress and must always run before
+        // any stall stop; the watchdog applies only to the LLM-driven path.
+        const seedStep = findReachableSeedStep(target);
+        if (!seedStep && state.craftsSinceClosenessGain >= CONFIG.closenessStallLimit) {
+          state.session.status = 'stopped';
+          recordEvent('run_stop', errorRecord({
+            name: 'ClosenessStall',
+            message: 'no closer element found after ' + state.craftsSinceClosenessGain + ' crafts'
+          }, { reason: 'no closer element found' }));
+          log('No closer element found after ' + state.craftsSinceClosenessGain + ' crafts; stopping.', 'error');
+          setStatus('No closer element found');
+          break;
+        }
+
         const replanReason = planNeedsReplan(target);
         if (replanReason) clearPlan(replanReason);
+
+        if (seedStep) {
+          log('Seed step: ' + seedStep.a + ' + ' + seedStep.b + ' → ' + seedStep.result, 'info');
+          const seeded = await craftPair(seedStep.a, seedStep.b, IC, {
+            a: seedStep.a, b: seedStep.b,
+            expected: seedStep.result, score: 100, why: 'seed'
+          });
+          kb.attempts++;
+          attemptsThisRun++;
+          recordEvent('attempt', { index: attemptsThisRun, source: 'seed' });
+          state.consecutiveNoNew = seeded ? 0 : state.consecutiveNoNew + 1;
+          applyPlanFeedback(target);
+          // Seed crafts are exempt from the closeness watchdog; they advance the
+          // chain deterministically even when no single result scores closer.
+          if (seeded) state.craftsSinceClosenessGain = 0;
+          saveKB();
+          updateCounters();
+          setStatus('Attempt ' + attemptsThisRun + ' / ' + CONFIG.maxAttemptsPerRun);
+          if (hasElement(target)) {
+            completeRun('target crafted from seed', attemptsThisRun);
+            log('SUCCESS: "' + target + '" crafted from seed (attempt ' + attemptsThisRun + ').', 'success');
+            setStatus('Target found');
+            break;
+          }
+          if (seeded) {
+            clearPlan('new element ' + state.lastCraft.result + ' discovered — re-plan from it');
+          }
+          continue;
+        }
 
         if (state.consecutiveNoNew >= CONFIG.consecutiveNoNewLimit && !watchdogLogged) {
           log('Watchdog: ' + state.consecutiveNoNew + ' crafts without a new element; forcing explore on the next plan.', 'error');
@@ -2399,7 +3330,8 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
             break planLoop;
           }
           if (isNew) {
-            log('New element discovered; stopping queue to re-plan with fresh state.', 'info');
+            clearPlan('new element ' + state.lastCraft.result + ' discovered — re-plan from it');
+            log('New element discovered; stopping queue to re-plan from it.', 'info');
             break;
           }
           await jitterSleep(CONFIG.attemptDelayMs);
@@ -2409,24 +3341,32 @@ Self-check before emitting: 5 ladder strings; first 4 absent from AVAILABLE ELEM
 
       if (!state.stopped && attemptsThisRun >= CONFIG.maxAttemptsPerRun && !hasElement(target)) {
         state.session.status = 'stopped';
-        recordEvent('run_stop', { reason: 'safety stop' });
+        recordEvent('run_stop', errorRecord(
+          { name: 'SafetyStop', message: 'safety stop after ' + CONFIG.maxAttemptsPerRun + ' attempts' },
+          { reason: 'safety stop' }
+        ));
         log('Safety stop: reached ' + CONFIG.maxAttemptsPerRun + ' attempts this run.', 'error');
         setStatus('Safety stop');
       }
     } catch (e) {
       if (e instanceof StopSignal) {
         state.session.status = 'stopped';
-        recordEvent('run_stop', { reason: e.message });
+        recordEvent('run_stop', errorRecord(e, { reason: e.message }));
         log(e.message, e.level);
       } else {
         state.session.status = 'error';
-        recordEvent('run_error', { reason: e && e.message ? e.message : String(e) });
+        recordEvent('run_error', errorRecord(e, { reason: e && e.message ? e.message : String(e) }));
         log('Run error: ' + (e && e.message ? e.message : String(e)), 'error');
         setStatus('Error');
       }
     } finally {
       state.session.endedAt = new Date().toISOString();
-      recordEvent('run_end', { status: state.session.status });
+      state.session.kbAtEnd = kbSnapshot();
+      recordEvent('run_end', {
+        status: state.session.status,
+        elapsedMs: sessionElapsedMs(),
+        attempts: kb.attempts
+      });
       state.IC = null;
       state.running = false;
       state.stopped = false;

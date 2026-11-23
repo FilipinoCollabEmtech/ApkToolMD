@@ -245,12 +245,17 @@ The knowledge base shape (see the `STORAGE` block and `loadKB()`):
     "Fire\u0000Earth": { a, b, result, isNew, misses, at }
   },
   plan: {
-    ladder: [ "Time Traveler", "Police Box", "Time Machine", "TARDIS", "Doctor Who" ],
+    ladder: [ "Engine", "Car", "Time Machine", "Rose Tyler", "Doctor Who" ],
     activeIndex: 0, mode: "continuation",
-    refutedSteps: [], refutedRecipes: [], craftsSinceReplan: 0, updatedAt: 0
+    refutedRecipes: [], craftsSinceReplan: 0, updatedAt: 0
   },
   goals:    [ { element, recipes: [ { a, b } ], confidence } ],
-  hypotheses: [ { a, b, predicted, actual, correct, at } ],
+  recipeMemory: {
+    "Fire\u0000Water": { a, b, result, isNew, source, verification, target,
+      hits, confirms, refutations, at, updatedAt, lastRefutedAt, disabled }
+  },
+  refutedSeeds: [ { a, b, expected, actual, target, at } ],
+  recipeMemorySeedVersion: 1,
   patterns: [ "Fire + Earth → Lava (already crafted; do not repeat)", ... ],
   attempts: 0,
   discoveries: 0,
@@ -265,7 +270,8 @@ to be exported, inspected, or pasted into a bug report. The page's storage is ne
 written to by this script; reading `IC.getItems()` is enough.
 
 Retention uses item-count caps, not byte-size measurement: `trimArray()`
-keeps the last 500 recipes, 300 failures, and 20 hypotheses; `updatePatterns()` keeps 12 notes.
+keeps the last 500 recipes, 300 failures, and 500 refuted seeds; `recipeMemory` is capped
+at 20000 entries with LRU eviction of non-seed entries; `updatePatterns()` keeps 12 notes.
 Since each entry is small, that bounds GM storage growth in practice while keeping
 plenty of history for the prompt sampler.
 
@@ -366,31 +372,35 @@ otherwise it switches and logs why.
 
 ## 7. The AI loop, dedup, and the batch contract
 
-A deep DAG of subgoals produced malformed JSON three times out of three in live tests.
-Subgoals were decorative — `run()` never used them to pick a craft — scores were
-self-reported, and the queue abandoned a chain on any NEW element. A flat five-name
-ladder with code-controlled active step was valid 5/5, target-relevant 5/5, and showed
-zero drift toward a generic anchor. There is no bundled recipe corpus: the ladder and
-craft history are the only guidance.
+The old planner trusted model predictions. In live runs none of the guessed products
+matched the real craft, and ladder rungs such as `Time Traveler`, `Police Box`, and
+`TARDIS` were unreachable: the active step never advanced. The new planner never uses a
+model product guess. It preselects a reachable pair of owned elements, asks only for pairs
+and a descriptive ladder, and treats the game as the authority on every result.
+Hand-written seed recipes are the only source of an `expected` value, and even those are
+validated by the game.
 
 `run()` is the conductor:
 
 1. `canonicalizeTarget()` fixes the goal string (exact discovered match, otherwise Title
    Case with a small stop-word set). `waitForIC(15000)` gets the game API and
    `syncElementsFromGame(IC)` merges discoveries.
-2. `resolveModel()` → pick a free model.
-3. `planNeedsReplan()` checks the persisted ladder; `clearPlan()` discards it with a
-   logged reason when needed. `buildPrompt(rawTarget, target)` supplies PLAN STATUS and
-   CANDIDATE PARENT POOL and computes the active step in code.
-4. `askForProposals(messages)` → `callKilo()`, then `parseProposals()`, which validates
-   the ladder, active index, producing step, and parent-pool membership.
-5. Sort usable proposals by descending `score`, then execute the queue. Before each
-   craft, `isPairTried()` gate. `craftPair()` records the outcome, `markPairTried()`,
-   `recordHypothesis()`, and `applyPlanFeedback()` advance or refute the active step.
-6. Increment attempts with jitter delay; re-check target and Stop between every step.
-7. A NEW element still stops the queue immediately — but the ladder and its updated
-   active index persist, so the next turn continues the same chain instead of
-   restarting. Otherwise continue through the queue until it is exhausted.
+2. `resolveModel()` picks a free model; a saved router is demoted for planning calls.
+3. BEFORE any LLM call, `findReachableSeedStep(target)` walks the seed chains in order.
+   If both parents are owned, the result is undiscovered, and the pair is untried and
+   enabled, it crafts that pair with `expected` set and continues — zero LLM calls.
+4. `planNeedsReplan()` checks the ladder; `clearPlan()` discards it with a logged reason.
+5. `buildPrompt(rawTarget, target)` supplies CLOSENESS RANKING, CLOSIEST ELEMENT, REQUIRED
+   PAIRS, NEW DISCOVERY, reachable KNOWN RECIPES, and the fixed parent pool.
+   `selectPairs()` guarantees the closest element appears in a required pair.
+6. `askForProposals(messages)` → `callKilo()` → `parseProposals()`. The contract has no
+   product-prediction field at all.
+7. Sort by score, execute the queue with the `isPairTried()` gate. `craftPair()` records
+   the outcome; `markPairTried()`, `noteRecipeMemory()`, and `applyPlanFeedback()` drive
+   advancement from observed result closeness.
+8. On ANY new discovery the ladder is cleared and re-planned from that element. After
+   `closenessStallLimit` crafts without a closer result the run stops with
+   `no closer element found`.
 
 **Hard dedup.** `pairKey(a, b)` sorts the two exact names and joins them with a NUL
 delimiter, so `Fire + Earth` and `Earth + Fire` share one key; self-pairs such as
@@ -412,14 +422,15 @@ canonical target. It demands one strict JSON object, no markdown:
   "ladder": ["NEW name 1", "NEW name 2", "NEW name 3", "NEW name 4", "<TARGET>"],
   "active_index": 0,
   "proposals": [
-    {"a": "POOL name", "b": "POOL name", "produces": "ladder[0]", "score": 0, "why": "<=120 chars"}
+    {"a": "POOL name", "b": "POOL name", "score": 0, "why": "<=120 chars"}
   ],
   "abstain": false
 }
 ```
 
-On a continuation turn the code supplies the ladder and the computed index; the model
-must copy the ladder verbatim and make every `produces` equal `ladder[active_index]`.
+There is no product-prediction field. `ladder[0]` is only a label for the code-selected
+reachable pair; the banned unreachable rungs are named explicitly in rule 2. On a
+continuation turn the model copies the supplied ladder verbatim.
 
 An abbreviated prompt:
 
@@ -428,20 +439,16 @@ TARGET: doctor who
 CANONICAL TARGET: Doctor Who
 SUCCESS: the canonical target appears in DISCOVERED ELEMENTS (case-insensitive check,
 exact names when crafting).
-PLAN STATUS:
-1. [HAVE] Lizard
-2. [NEED] Time Traveler
-3. [NEED] Police Box
-4. [NEED] Time Machine
-5. [NEED] Doctor Who
-ACTIVE STEP: index 1 = "Time Traveler" (first NEED). All proposals must produce exactly "Time Traveler".
+PLAN STATUS: (no plan — propose a new 5-name ladder)
+CLOSENESS RANKING: - Time: 0.812 / - Police: 0.760 / - Steam: 0.330 ...
+CLOSIEST ELEMENT: Time
+REQUIRED PAIRS (include verbatim in proposals): - Water + Time / - Time + Police
+NEW DISCOVERY SINCE LAST PLAN: Hacker
+KNOWN RECIPES (reachable now; exact names): - Hourglass + Sand = Time (seed/source-checked)
 FORBIDDEN / ALREADY ATTEMPTED PAIRS (4 shown — BANNED): ...
-AVAILABLE ELEMENTS (exact, case-sensitive): ...
-CANDIDATE PARENT POOL (40 names — proposal arguments MUST come from here): ...
-RECENT SUCCESSFUL RECIPES / RECENT FAILURES / LAST 10 CRAFT OUTCOMES ... [NEW] / [already known]
-HYPOTHESIS CHECK: - Human + Chef: predicted Doctor → got Cook (WRONG)
-LEARNED NOTES / NOT YET EXPLORED: ...
-REQUEST: return exactly 3 DISTINCT proposals, sorted by descending score, each producing the ACTIVE STEP ("Time Traveler").
+AVAILABLE ELEMENTS / CANDIDATE PARENT POOL (fixed: newest + never-parents): ...
+RECENT RECIPES / FAILURES / LAST 10 OUTCOMES / LEARNED NOTES: ...
+REQUEST: return exactly 3 DISTINCT proposals, sorted by descending score, including a REQUIRED PAIR and the closest element.
 ```
 
 An example response:
@@ -449,31 +456,65 @@ An example response:
 ```json
 {
   "strategy": "backward",
-  "analysis": "Combine time and travel to open the second rung.",
-  "ladder": ["Time Traveler", "Police Box", "Time Machine", "TARDIS", "Doctor Who"],
+  "analysis": "Use the reachable time pair to open the second rung.",
+  "ladder": ["Time Locket", "Police Signal", "Time Machine", "Rose Tyler", "Doctor Who"],
   "active_index": 0,
   "proposals": [
-    {"a":"Time","b":"Traveler","produces":"Time Traveler","score":88,"why":"direct parent pair"},
-    {"a":"Hourglass","b":"Human","produces":"Time Traveler","score":74,"why":"travel motif"},
-    {"a":"Clock","b":"Human","produces":"Time Traveler","score":61,"why":"time plus person"}
+    {"a":"Water","b":"Time","score":88,"why":"required reachable pair"},
+    {"a":"Time","b":"Police","score":74,"why":"required reachable pair"},
+    {"a":"Steam","b":"Engine","score":61,"why":"known productive parents"}
   ],
   "abstain": false
 }
 ```
 
-**Deterministic control.** `kb.plan` stores `{ ladder, activeIndex, mode, refutedSteps,
-refutedRecipes, craftsSinceReplan, updatedAt }` — all bounded, no KB version bump.
-`firstNeedIndex()` computes the active step as the first ladder name not yet discovered.
-After each craft, `applyPlanFeedback()` advances that index when the observed result
-equals the step, records a sticky recipe (`result === a || result === b`) as a pattern
-note, or adds a refuted step when the result is a different product. `parseProposals()`
-drops any proposal whose ladder is not exactly five strings ending in the canonical
-target, whose producing name differs from the active step, whose arguments are outside
-CANDIDATE PARENT POOL, or whose score is not numeric; fewer than two survivors triggers
-the repair re-prompt. `planNeedsReplan()` discards the ladder on a malformed length, a
-target mismatch, a stale active step, a refuted-twice step, eight crafts without a
-re-plan, or the twelve-craft no-progress watchdog. There are no hardcoded recipe pairs
-or concept tables — the ladder and craft history are the only knowledge used.
+**Reachable-first control.** Closeness is deterministic: `buildClosenessContext()` builds
+token weights from `TARGET_THEME_LEXICON` (falling back to target tokens), recency range,
+recipe degree, and an observed-result memory index. `scoreCloseness()` combines token
+overlap, lexicon weight, letter bigrams, recency, connectivity, and a memory-recursive
+term capped at depth 2. `rankElements()` sorts owned elements and `selectPairs()` always
+includes the closest one in the required pairs. No model opinion enters this ranking.
+
+`kb.plan` stores `{ ladder, activeIndex, mode, refutedRecipes, craftsSinceReplan,
+updatedAt }`. `applyPlanFeedback()` advances on observed result closeness, never on a
+prediction or name equality; sticky self-reproduction is recorded as an observed fact.
+`parseProposals()` keeps ladder/target/pool/score validation, drops tried pairs, injects
+a required reachable pair when the model omitted it, and boosts memory-known seed pairs
+to score 100, and only when both parents are in the surfaced pool. It never rejects for
+a product guess. `planNeedsReplan()` triggers on a malformed ladder, a stale active step,
+the craft budget, or the no-progress watchdog. `craftsSinceReplan` resets only when a
+fresh plan is committed. Seed crafts are exempt from the closeness watchdog so a reachable
+chain always runs to completion.
+
+**Fixed pool.** `candidatePool()` is half newest discoveries by `firstSeen` and half
+elements never used as a parent in a tried pair, deduplicated case-insensitively and hard
+capped. `deadClusterElements()` excludes elements stuck reproducing themselves with no
+observed escape to an outside result, with a veto for any element that ever produced
+something else. Base elements and the target are never excluded. This prevents a fresh
+discovery from filling the pool only with clones of itself.
+
+**Seeds and memory.** `SEED_RECIPES` is a bounded literal table of hand-written starting
+recipes with `verification` labels (`editorial`, `source-checked`, `inferred`) and notes
+about version-dependence; they are source-attributed hints, not asserted facts.
+`kb.recipeMemory` is keyed by `pairKey` and stores observed and seed entries with confirm
+and refutation counts. `loadRecipeMemory()` migrates old history, overlays seeds only
+when a key is absent so an observation always wins, and tracks `recipeMemorySeedVersion`
+for future revisions. `noteRecipeMemory()` confirms a matching seed and disables a wrong
+one, emitting a `seed_refuted` event and a pattern note; the game result is the truth.
+`findReachableSeedStep()` walks the target's chains in order, and `reachableKnownRecipes()`
+supplies the prompt's KNOWN RECIPES section. When all chains are exhausted the LLM path
+continues with closeness-driven exploration; if the closeness stall limit is reached and
+no seed step is reachable, the run stops with `no closer element found`.
+
+**Router demotion.** `isRouterModel()` flags `reflection/`, `router`, and `beam` ids.
+`resolvePlanningModel()` prefers `CONFIG.planningModelIds`, then any non-router non-slow
+id, then any non-router id; if no non-router exists it returns an empty id and `callKilo()`
+refuses to send with a clear `StopSignal` — planning never falls through to a router.
+Routers stay visible in the dropdown but are labelled as falling back. A saved router
+override is used for the request model and dropdown display only; planning calls use the
+non-router model, with an explicit log line. `CONFIG.honorRouterOverrideForPlanning` can
+reverse this. `selectPairs()` excludes dead-cluster results from closeness ranking and
+guarantees the closest element only when an untried pair for it exists.
 
 `callKilo()` handles transport, including the one reasoning-free retry described above:
 HTTP 200 extracts `choices[0].message.content`; 429 triggers exponential backoff
@@ -551,9 +592,12 @@ checkbox and duration field; they are saved to `icai.model`, `icai.delay`,
   is measured in tens of seconds, so it gets its own budget and only one transport retry.
 - `slowModelIds`, `preferredFastModel` — exclude chronically slow free endpoints from
   the dropdown and pick a measured-fast default when available.
-- `maxHypothesesStored` (20) — cap on predicted-vs-actual records fed back to the prompt.
-- `consecutiveNoNewLimit` (12) — dry-spell watchdog; also a re-plan trigger and forces
-  `explore` on the next plan. `maxRefutedSteps` (12) bounds refutation history.
+- `maxRecipeMemoryEntries` (20000) — bound on the global observed/seed recipe memory.
+- `topKElements` (3), `closenessStallLimit` (12), `minViableCloseness` (0.05) —
+  reachable-first selection and the stall threshold for `no closer element found`.
+- `planningModelIds`, `honorRouterOverrideForPlanning` — keep weak router models out of
+  planning calls while leaving them visible in the dropdown.
+- `consecutiveNoNewLimit` (12) — dry-spell watchdog; also a re-plan trigger.
 - `repairDropRatio` (0.5) — batch drop fraction that triggers one repair re-prompt.
 - `dragDurationMs` (900) — total visible drag time in animated mode; the panel's
   duration input overrides it and validates 200–3000 ms.
@@ -578,8 +622,10 @@ that override and return to `CONFIG.preferredFastModel`.
 | `Free model catalog unavailable. Using unverified fallback ...` | Same failure at run start | Press **Refresh**; the fallback IDs are free-only but may have rotated |
 | `Saved model ... is no longer free/current; using ...` | The stored ID is not in the current free list | Pick a current entry from the dropdown |
 | `Using saved model override ... Clear it ...` | A saved `icai.model` is winning over the preferred fast model | Press **Preferred** in the panel or use the reset menu command |
-| `Re-planning (...): ladder discarded` | Malformed length, target mismatch, stale/refuted step, craft budget, or no-progress watchdog | Read the logged reason; a fresh ladder is requested next turn |
-| `Plan advanced to step N` / `Plan: step "..." refuted` | Observed result matched or contradicted the active ladder step | Normal feedback; the ladder persists with an updated active index |
+| `Re-planning (...): ladder discarded` | Malformed ladder, stale active step, craft budget, closeness stall, or no-progress watchdog | Read the logged reason; a fresh ladder is requested next turn |
+| `Closeness gain: ... plan advanced to step N` | Observed result scored closer to the target than the active step | Normal reachable-first feedback; no model prediction involved |
+| `Seed refuted: A + B expected X, got Y` | A hand-written seed expectation disagreed with the game | The seed is disabled and the observed result becomes truth; inspect `seed_refuted` in the export |
+| `No closer element found after N crafts; stopping.` | Closeness stall limit reached | Switch target or inspect closeness ranking and recipe memory |
 | `Warning: saved model ... is known-slow and may time out` | Saved override is in `CONFIG.slowModelIds` | Your choice was kept; switch to a faster free model if it stalls |
 | `Gateway auth/quota error 401/402/403` | Saved key rejected or provider quota hit | Re-enter the key, or clear it to run anonymously |
 | `HTTP 429 ... Backing off` | Free-tier rate limit | Wait; increase delay; reduce prompt sizes |
@@ -620,42 +666,74 @@ Start. It downloads `infinite-craft-run-<YYYYMMDD-HHmmss>.json` via a Blob and a
 temporary anchor from the page DOM, then revokes the object URL. With no session it
 logs an error instead of writing an empty file.
 
-The payload is a single pretty-printed object with `schemaVersion: 1`, `exportedAt`,
-`scriptVersion`, a `run` block (timestamps, raw and canonical target, model, executor
-mode, status), a `summary` (attempts, crafts, new discoveries, known results, no
-results, failures, refutations, re-plans, AI requests, accepted responses, and the final
-ladder with active step), the chronological `events` array, and a short `notes` string.
-`aiRequests` counts every `ai_request` event — including repair re-prompts and failed
-batches — while `acceptedResponses` counts batches that passed validation. `attempts`
-counts only crafts that reached `IC.craft`; `crafts` also includes aborted infrastructure
-failures. `rePlans` counts cleared non-empty ladders, and `failures` counts only craft
-infrastructure failures. `recordEvent()`
-captures run lifecycle, model choice, each AI request and accepted batch (strategy,
-analysis, ladder, active index, proposal counts and the full proposal list), repairs,
-each craft (pair, executor, result, `isNew`, predicted product and whether it was
-correct, infra-failure flag), plan creation/advance/clear with reasons, refutations, and
-HTTP anomalies such as 429s, 5xx retries, timeouts, and the reasoning fallback.
+The payload is a single pretty-printed object with `schemaVersion: 2`, `exportedAt`,
+`scriptVersion`, a `run` block (timestamps, raw and canonical target, request model,
+executor mode, status), a `summary`, the chronological `events`, the full
+`logLines` timeline, `export` cap metadata, `kbAtStart`, `kbAtEnd`, a `kbDelta`, the
+current `closenessContext`, and a short `notes` string.
+`summary.attempts` counts only crafts that reached `IC.craft`; `summary.crafts` also
+includes aborted infrastructure failures. `aiRequests` counts every `ai_request` event —
+primary and fallback calls, repair re-prompts, and failed batches — while
+`acceptedResponses` counts only `ai_response` events marked `accepted: true` (batches
+that passed validation), while `rejectedResponses` counts those marked `accepted: false`.
+`rePlans` counts cleared non-empty ladders; `failures` counts only craft infrastructure
+failures; `seedRefutations` counts `seed_refuted` events.
 
-Events are capped at 2000 with oldest dropped. `recordEvent()` recursively drops
+`events` is deliberately exhaustive. `ai_request` carries the entire request body —
+model, both prompt messages verbatim, max tokens, temperature, reasoning settings,
+stream flag, purpose, fallback flag, a request `sequence` (distinct from craft attempt
+numbers), and elapsed time. `ai_response` carries the raw
+assistant message verbatim, finish reason, token usage, response model/id, plus parsed
+strategy, analysis, full ladder and subgoals, every proposal, and each rejected proposal
+with its specific reason (tried pair, invalid name, outside the parent pool, duplicate,
+bad score). Failed batches are recorded too, with the reason they
+were rejected. `craft` events carry both parent names, executor mode, the full result
+object, `isNew`, element counts before and after, elapsed milliseconds, the originating
+proposal, and drag diagnostics (input type, spawn positions, hover match, observer
+outcome, cleanup actions). Plan events include the ladder before and after, active index
+before and after, trigger reason, and refutation context. `refutation` events include a
+full plan snapshot, the node and pair involved, the observed product, sticky flag, and
+the recipe refuted. `seed_refuted` events record the hand-written expected product, the
+actual game result, and the target chain. `http_anomaly` events include status, code, full detail,
+attempt number, backoff delay, endpoint path, timeout, elapsed time, and whether the
+request later recovered. `run_stop` and `run_error` carry the error name, message, stack,
+status/code/detail, and a context snapshot of the active step, last craft, and last AI
+request. `model_selected` records the resolution path (saved override, auto, preferred,
+fallback), the chosen planning model and whether a router was demoted, all candidate ids,
+and why that model won. HTTP anomalies and the reasoning
+fallback are events too, so a malfunction can be traced instead of merely reported.
+
+`kbAtStart` and `kbAtEnd` capture elements (count and all names), recipes, failures,
+tried pairs, recipeMemory entries and counts, refuted seeds, goals, the plan, patterns,
+and counters. `kbDelta` lists exactly the new elements, recipes, failures, tried pairs,
+refuted seeds, refuted recipes, memory entries, patterns, and counter deltas — so the export shows
+what was learned. Both snapshots deep-copy the plan, so the start state is not overwritten
+by later mutations.
+
+Events are capped at 2000 entries and the log timeline at 5000 entries, with the oldest
+dropped; the `export` block reports `truncated` and the drop counts. Individual payloads are never truncated: a
+large prompt or raw reply is included whole. `recordEvent()` recursively drops
 credential-shaped field names at any depth and scrubs bearer tokens, `key:`/`key=value`
-fragments, and common token prefixes from string values. That reduces the chance of a
-secret surviving in reflected gateway error text but cannot guarantee it for arbitrary
-third-party messages. The key lives only in `icai.key`, the password input,
-and the Authorization header — it is never in the session or export. The human-readable
-`log()` is unchanged; this is an additional structured feed. `produces` values are AI
-hypotheses, not verified game results.
+fragments, and common token prefixes from string values, including error text and log
+lines. That reduces the chance of a secret surviving in reflected gateway text but cannot
+guarantee it for arbitrary third-party messages. The key lives only in `icai.key`, the
+password input, and the Authorization header — it is never in the session or export.
+The human-readable `log()` is unchanged; this is an additional structured feed.
+Model product predictions do not exist in this design; only seed `expected` values are
+recorded, and the game result is always authoritative.
 
 ---
 
 ## 12. Make it yours
 
-**New target strategy.** Replace the prioritization in `pickElementNames()`.
-It currently boosts active-step and ladder matches highest, then adds target-token
-overlap, base-element status, and recency.
-Bias toward elements sharing an emoji category, or toward names whose recipes produced
-genuinely NEW results (`isNew === true`). Avoid bonuses based on raw per-element craft
-counts: rewarding repeated known-result crafts anchored the planner on one element.
-Keep the return value an array of exact names.
+**New target strategy.** Adjust `TARGET_THEME_LEXICON` for a new target, or extend
+`scoreCloseness()` with another deterministic signal. It combines token overlap, lexicon
+weights, bigrams, recency, recipe connectivity, and depth-capped observed-result memory.
+`rankElements()` and `selectPairs()` then guarantee a reachable required pair. To add
+known recipes, edit `SEED_RECIPES` with the proper `verification` label and bump
+`RECIPE_MEMORY_SEED_VERSION` so the new rows are applied without overwriting observations.
+Avoid bonuses based on raw per-element craft counts: rewarding repeated known-result
+crafts anchored the planner on one element.
 
 **Change the prompt.** Edit `LADDER_SYSTEM` and the `parts` array in `buildPrompt()`.
 If you change the output format, change `parseProposals()` to match — the validator is
